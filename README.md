@@ -15,7 +15,7 @@ Renders ladder logic rungs inline in Obsidian notes from:
 
 **Status: M1.** Neutral text renders: contacts, coils, nested branches, empty legs, boxes (operands listed positionally), rung comments, rung numbers, and an error panel with line/column carets. L5X and L5K arrive in M2, PLCopen in M3. Plan and decisions: [reference/outline.md](reference/outline.md).
 
-Optional header (between `---` lines at the top of the block): `start` (first rung number), `numbers: on|off`, `align: right|inline`, `format: neutral|l5x|l5k|plcopen`. Lines starting `//` above a rung become its comment.
+Optional header (between `---` lines at the top of the block): `start` (first rung number), `numbers: on|off`, `align: inline|right` (inline puts outputs right after the last input, like Studio 5000; right pushes them to the right rail), `format: neutral|l5x|l5k|plcopen`. Lines starting `//` above a rung become its comment.
 
 ## Development
 

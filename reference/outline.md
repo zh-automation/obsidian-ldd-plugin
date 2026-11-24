@@ -1,6 +1,6 @@
 # Obsidian Ladder Logic Plugin: Outline
 
-Status: v0.4 (2026-11-24). Interview complete (section 0), samples validated (section 0.1), M0 and M1 code done (section 6). Items tagged **[verify]** are claims to confirm against the source before implementation.
+Status: v0.5 (2026-11-24). Interview complete (section 0), samples validated (section 0.1), M0 and M1 code done (section 6), Q14 answered (outputs inline). Items tagged **[verify]** are claims to confirm against the source before implementation.
 
 ---
 
@@ -23,7 +23,7 @@ Defaults chosen without asking (cheap to change):
 - Mobile-compatible (`isDesktopOnly: false`); costs nothing if no Node APIs are used.
 - Plugin id `ladder-logic-diagrams`, name "Ladder Logic Diagrams".
 - (M1) Contacts and coils use uniform 16-character cells; longer tag names wrap at member boundaries. Keeps symbols in stacked branch legs aligned, like the PLC editor.
-- (M1) Output alignment defaults to `right` (trailing outputs against the right rail) for Rockwell style. This reverses the v0.2 note that Studio 5000 is "inline"; confirm against Studio 5000 (Q14). Override per block with `align: inline`.
+- (M1) Output alignment defaults to `inline` for Rockwell style: outputs sit right after the last input, then a wire runs to the right rail, as in Studio 5000 (Q14, answered 2026-11-24). Override per block with `align: right` to push trailing outputs against the right rail. The IEC-style default (M3) is still to be decided from the CODESYS samples.
 
 ### 0.1 Sample validation (2026-11-24)
 
@@ -158,7 +158,7 @@ IEC style (PLCopen): `| |`, `|/|`, `|P|`, `|N|`, `( )`, `(/)`, `(S)`, `(R)`, fun
 
 - Style: match source (default) / always Rockwell / always IEC
 - Rung numbers on/off, default start number
-- Output alignment: right-justified to rail (default) or inline
+- Output alignment: inline (default, like Studio 5000) or right-justified to rail
 - Cell width in characters (default 16), font size
 
 ---
@@ -307,7 +307,7 @@ Pure function: `layout(rungs: Rung[], style: StyleConfig) => Geometry`. No DOM a
 - Series: width = sum of children, height = max.
 - Parallel: width = max leg width, height = sum of legs; shorter legs padded with wire; vertical branch rails at start and end x.
 - Labels: tag name above contact/coil.
-- Output alignment option: right-justify trailing outputs.
+- Output alignment: `inline` (default) places outputs right after the last input and wires the remainder to the right rail; `right` right-justifies trailing outputs against the rail.
 - Text measurement: monospace font with fixed char width (no DOM measuring).
 - Rung wrapping (M4): break the top-level series at element boundaries when width exceeds max, draw continuation markers like Studio 5000.
 
@@ -493,7 +493,7 @@ PLCopen XML (CODESYS 3.5):
 | Q11 | Can you export CODESYS LD POUs that use blocks (TON, CTU, R_TRIG), set/reset coils, edge contacts, and network comments? | Open; needed before M3 |
 | Q12 | Were the three CODESYS files exported by CODESYS, or generated (e.g. for import into CODESYS)? | Open |
 | Q13 | Pull AOI pin labels (from pasted L5X definitions) into M2? | Open |
-| Q14 | Does Studio 5000 draw trailing outputs against the right rail (current default) or right after the last input? | Open |
+| Q14 | Does Studio 5000 draw trailing outputs against the right rail or right after the last input? | Right after the last input; `inline` is now the default (2026-11-24) |
 
 ---
 

@@ -27,6 +27,7 @@ export interface LayoutStyle {
 	boxPadX: number;
 	boxPadY: number;
 	numbers: boolean;
+	/** "inline": outputs follow the last input, then a wire to the right rail (Studio 5000). "right": trailing outputs sit against the right rail. */
 	align: Align;
 }
 
@@ -46,7 +47,7 @@ export const DEFAULT_STYLE: LayoutStyle = {
 	boxPadX: 8,
 	boxPadY: 4,
 	numbers: true,
-	align: "right",
+	align: "inline",
 };
 
 export type TextClass = "tag" | "num" | "comment" | "box-title" | "box-text" | "err-text";

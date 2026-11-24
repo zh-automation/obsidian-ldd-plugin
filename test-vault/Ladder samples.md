@@ -21,6 +21,18 @@ XIC(Auto)[XIC(Cmd_Start),XIC(Pump_01.Running)[XIO(Fault),]]XIO(Estop)[OTE(Pump_0
 GE(Tank_01.Level,80.0)LIMIT(10,Tank_01.Temp,90)MOVE(0,Valve_02.Pos);
 ```
 
+## Neutral text: outputs against the right rail
+
+Same seal-in as above with `align: right`; the default (`inline`) keeps outputs right after the last input.
+
+```ladder
+---
+align: right
+---
+[XIC(Start_PB),XIC(Motor_Run)]XIO(Stop_PB)OTE(Motor_Run);
+XIC(Motor_Run)TON(Motor_Delay,5000,0);
+```
+
 ## L5K routine text
 
 ```ladder

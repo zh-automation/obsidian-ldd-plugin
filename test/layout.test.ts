@@ -34,19 +34,23 @@ describe("layout: fixtures", () => {
 		}
 	});
 
-	it("N1 right-aligns the coil to the right rail by default", () => {
+	it("N1 places the coil in the cell right after the contact by default (inline)", () => {
 		const g = lay(NEUTRAL.N01_single);
 		const [contact, coil] = syms(g);
 		expect(contact?.t).toBe("contact");
 		expect(coil?.t).toBe("coil");
+		expect(coil!.x - contact!.x).toBeCloseTo(CELL_W, 5);
+		// A wire carries power from the coil's cell to the right rail.
 		const railR = rails(g)[1]!.x1;
-		expect(cellRight(coil!)).toBeCloseTo(railR - S.rungPadX, 5);
+		const tail = lines(g).find((l) => l.cls === "wire" && l.x2 === railR);
+		expect(tail?.x1).toBeCloseTo(cellRight(coil!), 5);
 	});
 
-	it("N1 places the coil in the cell right after the contact with align: inline", () => {
-		const g = lay(NEUTRAL.N01_single, { align: "inline" });
-		const [contact, coil] = syms(g);
-		expect(coil!.x - contact!.x).toBeCloseTo(CELL_W, 5);
+	it("N1 right-aligns the coil to the right rail with align: right", () => {
+		const g = lay(NEUTRAL.N01_single, { align: "right" });
+		const coil = syms(g)[1]!;
+		const railR = rails(g)[1]!.x1;
+		expect(cellRight(coil)).toBeCloseTo(railR - S.rungPadX, 5);
 	});
 
 	it("N2 stacks branch legs at the same x with branch lines on both sides", () => {
@@ -62,13 +66,20 @@ describe("layout: fixtures", () => {
 		expect(verticalWires(lay(NEUTRAL.N03_nested))).toHaveLength(6);
 	});
 
-	it("N4 right-aligns the whole output branch and aligns its legs", () => {
+	it("N4 aligns the legs of an output branch", () => {
 		const g = lay(NEUTRAL.N04_output_branch);
 		const lamp = symByTag(g, "Lamp_01")!;
 		const latch = symByTag(g, "Latch_01")!;
 		expect(latch.x).toBe(lamp.x);
 		expect(latch.label).toBe("L");
-		// The branch's closing line sits at the right edge of the rung area.
+		// Inline: the branch opens right where the input ends, not out at the rail.
+		const railR = rails(g)[1]!.x1;
+		const rightBranch = Math.max(...verticalWires(g).map((v) => v.x1));
+		expect(rightBranch).toBeLessThan(railR - S.rungPadX);
+	});
+
+	it("N4 right-aligns the whole output branch with align: right", () => {
+		const g = lay(NEUTRAL.N04_output_branch, { align: "right" });
 		const railR = rails(g)[1]!.x1;
 		const rightBranch = Math.max(...verticalWires(g).map((v) => v.x1));
 		expect(rightBranch).toBeCloseTo(railR - S.rungPadX, 5);
@@ -125,10 +136,17 @@ describe("layout: options and text", () => {
 	});
 
 	it("uses one rung width (shared right rail) for every rung in a block", () => {
-		const g = lay("XIC(A)OTE(B);\nXIC(A)XIC(B)XIC(C)XIC(D)XIC(E)XIC(F)XIC(G)XIC(H)XIC(I)OTE(J);");
+		const src = "XIC(A)OTE(B);\nXIC(A)XIC(B)XIC(C)XIC(D)XIC(E)XIC(F)XIC(G)XIC(H)XIC(I)OTE(J);";
+		const g = lay(src);
 		expect(rails(g)).toHaveLength(2);
+		// Inline: each rung's coil follows its own inputs, and both rungs wire through to the shared rail.
 		const coils = syms(g).filter((s) => s.t === "coil");
-		expect(coils[0]!.x).toBe(coils[1]!.x);
+		expect(coils[0]!.x).toBeLessThan(coils[1]!.x);
+		const railR = rails(g)[1]!.x1;
+		expect(lines(g).filter((l) => l.cls === "wire" && l.x2 === railR)).toHaveLength(2);
+		// Right: coils line up against the shared rail.
+		const r = syms(lay(src, { align: "right" })).filter((s) => s.t === "coil");
+		expect(r[0]!.x).toBe(r[1]!.x);
 	});
 
 	it("wraps long tag names at member boundaries", () => {
