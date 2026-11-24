@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Rung } from "../src/ir/types";
 import { DEFAULT_STYLE, layoutRungs, wrapTag, wrapText, type Geometry, type LayoutStyle, type Prim } from "../src/layout/layout";
 import { parseNeutralText } from "../src/parsers/neutralText";
+import { parsePLCopen } from "../src/parsers/plcopen";
 import { NEUTRAL } from "./fixtures/neutral";
+import { PLCOPEN } from "./fixtures/plcopen";
 
 function lay(src: string, style: Partial<LayoutStyle> = {}): Geometry {
 	const rungs: Rung[] = parseNeutralText(src).rungs.map((r, i) => ({ ...r, number: i }));
@@ -180,6 +182,55 @@ describe("layout: boxes", () => {
 		const g = lay("XIC(A)MCR();");
 		expect(texts(g, "tag")).toEqual(["A"]);
 		expect(syms(g)[1]!.label).toBe("MCR");
+	});
+});
+
+describe("layout: IEC function blocks", () => {
+	const plc = (src: string) => {
+		const r = parsePLCopen(src);
+		return layoutRungs(
+			r.sections[0]!.rungs.map((g, i) => ({ ...g, number: i + 1 })),
+			{ symbols: "iec", align: "right" },
+		);
+	};
+	const textAt = (g: Geometry, cls: string, text: string) =>
+		g.prims.find((p) => p.t === "text" && p.cls === cls && p.text === text) as Extract<Prim, { t: "text" }>;
+
+	it("draws type, instance, pin names inside, and data values outside the box", () => {
+		const g = plc(PLCOPEN.P3_blocks);
+		expect(texts(g, "box-title")).toEqual(["TON", "R_TRIG", "CTU"]);
+		expect(texts(g, "instance")).toEqual(["tonDelay", "rtPart", "ctuParts"]);
+		const box = g.prims.find((p) => p.t === "box")! as Extract<Prim, { t: "box" }>;
+		const pt = textAt(g, "box-text", "T#5S");
+		const et = textAt(g, "box-text", "tElapsed");
+		expect(pt.anchor).toBe("end");
+		expect(pt.x).toBeLessThan(box.x);
+		expect(et.x).toBeGreaterThan(box.x + box.w);
+		expect(textAt(g, "box-name", "PT").x).toBeGreaterThan(box.x);
+	});
+
+	it("lines the RESET pin up with the leg that feeds it, with no join line on the right", () => {
+		const g = plc(PLCOPEN.P3_blocks);
+		const reset = textAt(g, "box-name", "RESET");
+		const resetContact = syms(g).find((s) => s.tip.includes("xResetCount"))!;
+		// Pin text baseline is the pin row + 4.
+		expect(reset.y - 4).toBeCloseTo(resetContact.y, 5);
+		const cu = textAt(g, "box-name", "CU");
+		expect(cu.y).toBeLessThan(reset.y);
+	});
+
+	it("uses the EN/ENO pins as the rung wire", () => {
+		const g = plc(PLCOPEN.P7_en_eno);
+		const en = textAt(g, "box-name", "EN");
+		const contact = syms(g)[0]!;
+		expect(en.y - 4).toBeCloseTo(contact.y, 5);
+		expect(textAt(g, "box-text", "iSetpoint")).toBeDefined();
+		expect(textAt(g, "box-text", "iTarget")).toBeDefined();
+	});
+
+	it("records the symbol style for the renderer", () => {
+		expect(plc(PLCOPEN.P1_contact_coil).symbols).toBe("iec");
+		expect(lay(NEUTRAL.N01_single).symbols).toBe("rockwell");
 	});
 });
 

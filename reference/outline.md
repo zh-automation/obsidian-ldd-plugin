@@ -1,6 +1,6 @@
 # Obsidian Ladder Logic Plugin: Outline
 
-Status: v0.6 (2026-11-24). Interview complete (section 0), samples validated (section 0.1), M0, M1, and M2 code done (section 6), Q14 answered (outputs inline). Items tagged **[verify]** are claims to confirm against the source before implementation.
+Status: v0.7 (2026-11-24). Interview complete (section 0), samples validated (section 0.1), M0 to M3 code done (section 6), Q14 answered (outputs inline). Items tagged **[verify]** are claims to confirm against the source before implementation.
 
 ---
 
@@ -27,6 +27,8 @@ Defaults chosen without asking (cheap to change):
 - (M2) XML is read with a small built-in reader (`src/parsers/xml.ts`) instead of `DOMParser`: pasted L5X is often a fragment (several `<Rung>` elements, no root), and errors need line/column positions. M3 reuses it for PLCopen.
 - (M2) AOI parameter names are pulled into M2 (Q13): when the pasted L5X or L5K includes the AOI definition, the AOI box labels its rows. Without the definition, AOI operands stay positional.
 - (M2) Full exports render every ladder routine as its own titled diagram ("Program / Routine", "AOI / Logic"); ST, FBD, and SFC routines are skipped with a one-line notice.
+- (M3) PLCopen draws in IEC style with outputs against the right rail (`align: right`) and networks numbered from 1, like CODESYS. Evidence: all 68 coils in the positioned samples sit at the same distance from the right rail. The header can switch any block to `style: rockwell`, `align: inline`, or another `start`.
+- (M3) Networks that cannot be drawn as series-parallel show as error rungs instead of the planned position-based fallback (3.5).
 
 ### 0.1 Sample validation (2026-11-24)
 
@@ -63,7 +65,7 @@ Findings that change the plan:
 
 1. **Instruction library needs v36 mnemonic aliases.** Logix Designer v36 renamed several instructions to IEC 61131-3 / PLCopen names (`EQU`→`EQ`, `NEQ`→`NE`, `LIM`→`LIMIT`, `MOV`→`MOVE`, and the compare family). Both spellings must map to one entry. Source: Rockwell "Updated instruction mnemonics" page (Logix Designer docs v37/v38). Added to 3.4.
 2. **PLCopen parser must accept both `tc6_0200` and `tc6_0201`.** Match elements by local name, ignore the namespace version.
-3. **CODESYS samples cover only contacts and coils.** P3 (blocks), P4 (comments), edges, and set/reset have no real coverage yet. Need more exports before M3 (Q11).
+3. **CODESYS samples cover only contacts and coils.** P3 (blocks), P4 (comments), edges, and set/reset have no real coverage yet. Need more exports before M3 (Q11). (Update 2026-11-24: a direct CODESYS export with TON, R_TRIG, and CTU arrived; see 3.5. Edges, set/reset, and comment text still have no real sample.)
 4. **CODESYS sample provenance is unclear (Q12).** The wrapper matches CODESYS, but the `<LD>` bodies are one-element-per-line while the rest of each file is indented, every timestamp is exactly 12:00:00, and two of three `ObjectId`s are version-5 (name-hashed) UUIDs. That pattern suggests generated files rather than a direct CODESYS export. If they were generated (for example, to import into CODESYS), they are fine as fixtures but do not tell us what CODESYS itself writes.
 5. **AOIs matter more than expected.** Consider pulling "AOI pin labels from L5X definitions" forward from section 9 into M2 when a full L5X (with `<AddOnInstructionDefinitions>`) is pasted. (Done in M2. Check against samples: all 345 AOI calls whose definition is in the same file have exactly 1 + (number of `Required="true"` parameters) operands.)
 6. **Rung wrapping matters.** A 117-instruction rung is unreadable as a single scrolling line; M4 wrapping stays, but should not slip.
@@ -303,21 +305,29 @@ Still **[verify]** against Studio 5000 on screen (the user can screenshot a few 
 - LD elements to handle: `leftPowerRail`, `rightPowerRail`, `contact` (negated, edge), `coil` (negated, storage set/reset, edge), `block` (typeName, instanceName, inputVariables, outputVariables, inOutVariables), `inVariable`, `outVariable`, `inOutVariable`, `comment`, `connector`/`continuation`, `jump`, `label`, `return`.
 - Wiring: every element has `localId`; edges come from `connectionPointIn/connection@refLocalId` (plus `formalParameter` for block pins).
 
-CODESYS 3.5 specifics (top risk):
+CODESYS 3.5 specifics, confirmed by the direct CODESYS export added 2026-11-24 (SP22 Patch 4, two LD programs with TON, R_TRIG, CTU):
 
-- Samples show a plain `<LD>` body with one rail pair per rung and no `addData` network data. Provenance is unclear (Q12), so still **[verify]** against a file exported directly from CODESYS, which may add network titles/comments via `vendorElement` or `addData`.
-- **[verify]** How CODESYS represents EN/ENO, box inputs fed by constants, edge contacts, set/reset coils, network comments, and multiple POUs per export file. No sample covers these yet (Q11).
-- Keep CODESYS quirks in a separate adapter (`parsers/codesys.ts`) so the core stays spec-based for other vendors later.
+- One `leftPowerRail` and one `rightPowerRail` per POU, not per rung. The right rail has no connections: coil outputs connect to nothing.
+- Each network starts with a `<comment>` (the network comment, often an empty `<xhtml/>`) followed by a `<vendorElement>` whose `addData` holds `<ElementType>networktitle</ElementType>`; the title is its `alternativeText`.
+- Every `<position>` is `(0,0)`. Layout cannot use positions.
+- Attributes at their default (`negated`, `storage`, `edge`) may be left out.
+- Block output assignments are inline: `<connectionPointOut><expression>var</expression></connectionPointOut>`. Inputs from constants and variables come through `<inVariable>`.
+- A block can have two power-flow inputs: CTU's CU from R_TRIG.Q and RESET from its own contact chain off the left rail.
+- Parallel branches also get a `ParallelBranch` vendorElement; it repeats what the connections already say and is ignored.
+- The three older CODESYS files have one rail pair per rung, real positions, and no network markers (see Q12).
 
-Conversion algorithm:
+M3 implementation (`src/parsers/plcopen.ts`, `src/parsers/seriesParallel.ts`):
 
-1. Build a directed graph from left rail to right rail.
-2. Split into rungs: use CODESYS network boundaries if present, otherwise connected components between the rails, ordered by min Y position. (Samples: one rail pair per rung, so components split cleanly.) Order branch legs by Y position.
-3. Separate power flow from data flow: `inVariable` to a block pin becomes a box operand, not a rung element.
-4. Series/parallel reduction to the IR tree.
-5. Non-series-parallel networks (bridge wiring) cannot reduce to a tree: fall back to a position-based renderer that uses the XML `<position>` coordinates directly.
+1. Sections: one per LD body, titled by POU (and action or transition). ST, FBD, SFC, IL bodies are counted in a notice.
+2. Networks: cut at networktitle markers in document order when present (comment and title go on the rung); otherwise each connected group of elements (rails excluded) is a network, in document order.
+3. Power flow: contacts, coils, jumps, returns, connectors, the left rail, and any block with an input wired from those. A block's power input is EN when present, else the input pins wired from power; its power output is ENO, else its first output. Other pins are data: values from `inVariable`, inline expressions, `outVariable`, or `Instance.Pin` for a data wire from another block.
+4. Graph: elements are edges between electrical nodes (union-find over connection points). Outputs that lead nowhere count as reaching the right rail.
+5. Series-parallel reduction to the IR tree. A block with several power inputs gets a join node; legs into it become a Parallel with `pins`, drawn as legs that run straight into their pins (the block stretches so each pin lines up with its leg).
+6. Networks that do not reduce (bridge wiring), blocks whose second output drives the rung, bypass wires, unconnected elements, and dangling references become error rungs with a message and keep their number.
 
-If a POU contains several POUs, render each with a heading (POU name).
+Dropped from the plan: the position-based fallback. CODESYS writes no positions, and its LD editor only builds series-parallel networks, so it would only help other vendors' files. Revisit if one turns up (section 9).
+
+Still **[verify]** with more CODESYS exports: set/reset and negated coils, edge contacts, EN/ENO boxes, function (not function block) calls, non-empty network comments and titles, labels and jumps, a block whose second output drives a coil (CTUD QU/QD). The code follows the TC6 spec for these and has synthetic fixtures (P4, P7).
 
 ### 3.6 Layout engine
 
@@ -381,9 +391,8 @@ tool-obsidian-ldd-plugin/
       neutralText.ts
       l5x.ts                 <Rung> extraction -> neutralText, AOI definitions
       l5k.ts                 RC:/N: extraction -> neutralText, AOI definitions
-      plcopenXml.ts          spec-based TC6 parsing
-      codesys.ts             CODESYS 3.5 quirks (networks, addData)
-      plcopenGraph.ts        graph -> series/parallel reduction
+      plcopen.ts             PLCopen LD bodies: networks, power flow, blocks (CODESYS quirks included)
+      seriesParallel.ts      graph -> Series/Parallel IR, pin legs for multi-input blocks
     instructions/
       logix.ts               Rockwell instruction table
       iec.ts                 IEC standard FBs (TON, TOF, TP, CTU, CTD, R_TRIG, F_TRIG, SR, RS)
@@ -424,7 +433,7 @@ tool-obsidian-ldd-plugin/
 | M0 | Scaffold: template, build, test runner, `.gitignore` for samples, code block registered, renders a placeholder SVG | **Code done 2026-11-24**: 16 tests pass, build passes, bundle smoke-tested against a stubbed `Plugin`. Still needs a real load in Obsidian. |
 | M1 | Neutral text core: contacts, coils, series, nested branches, empty legs, error panel | **Code done 2026-11-24**: all N1 to N12 fixtures pass (66 tests); all 1,050 real sample rungs parse and lay out; 377-rung routine parses in ~4 ms and lays out in ~5 ms; checked visually in light and dark. Still needs a look in Obsidian Live Preview. |
 | M2 | Boxes + Logix instruction library, rung comments, rung numbers, multi-rung blocks, header options, L5X and L5K adapters | **Code done 2026-11-24**: fixtures N6 to N9, X1 to X7, K1 to K6 pass (111 tests). All 4 sample files (1,050 rungs) go through the real L5X/L5K front-ends with zero errors; 1,767 of 1,778 boxes get operand names (the rest are AOIs whose definition is not in the file). Paired L5K/L5X exports agree rung for rung. A 3 MB L5X parses in ~70 ms. Checked visually in light and dark. Still needs a look in Obsidian and the Studio 5000 [verify] items in 3.4. |
-| M3 | PLCopen XML for CODESYS 3.5: graph build, rung split, SP reduction, IEC symbols, block pins, position-based fallback | Fixtures P1 to P6 pass on real CODESYS exports |
+| M3 | PLCopen XML for CODESYS 3.5: graph build, rung split, SP reduction, IEC symbols, block pins, position-based fallback | **Code done 2026-11-24**: fixtures P1 to P8 pass (137 tests). All 4 CODESYS files (5 POUs, 74 networks, 6 blocks) reduce with zero errors; network counts match the networktitle markers / right rails. Checked visually against the real export. Position fallback dropped (3.5). Still needs a look in Obsidian and the 3.5 [verify] items. |
 | M4 | Polish: settings tab, style toggle, copy SVG/PNG, hover tooltips, rung wrapping, mobile check | Used on real notes for a week without issues |
 | M5 | Internal release: README with examples, release workflow, BRAT install instructions for the team | A teammate installs it without help |
 
@@ -479,14 +488,16 @@ PLCopen XML (CODESYS 3.5):
 - P3. TON block, IN from power flow, PT from a constant, Q continuing the rung
 - P4. Multiple networks in one POU, with network comments
 - P5. Multiple POUs in one export
-- P6. Bridge (non series-parallel) network, triggers fallback
+- P6. Bridge (non series-parallel) network, shown as an error rung
+- P7. Box with EN/ENO; IN from an inVariable, OUT to an outVariable
+- P8. Connection to a localId that does not exist
 
 ## 8. Risks
 
 | Risk | Mitigation |
 |---|---|
 | CODESYS export structure differs from the TC6 spec | Get real exports before M3; isolate quirks in `codesys.ts` |
-| Non-series-parallel PLCopen networks | Position-based fallback renderer |
+| Non-series-parallel PLCopen networks | Error rung with a clear message (CODESYS exports have no positions to fall back on; its editor only builds series-parallel networks) |
 | Bracket/comma ambiguity in neutral text | Paren-depth-aware tokenizer; dedicated fixtures |
 | Wide rungs unreadable on narrow panes and mobile | Horizontal scroll first, wrapping in M4 |
 | Instruction operand names wrong or incomplete | Source each table entry from the Rockwell manual; generic box fallback |
@@ -504,6 +515,7 @@ PLCopen XML (CODESYS 3.5):
 - AOI definitions from a separate note or vault file, so AOI boxes get labels without pasting the definition into every block
 - Click a tag to search the vault; cross-reference every rung in the vault that touches a tag
 - Scale-to-fit option for wide rungs
+- Position-based drawing for non-series-parallel PLCopen networks from tools that write real `<position>`s (dropped from M3, see 3.5)
 
 ---
 
@@ -521,8 +533,8 @@ PLCopen XML (CODESYS 3.5):
 | Q8 | Sample data? | User provides sanitized exports (D8) |
 | Q9 | License for eventual public release? | Open; decide before going public |
 | Q10 | CODESYS LD export structure (plain `<LD>`, `<FBD>`, or `addData` networks)? | Samples: plain `<LD>`, `tc6_0200`, rail pair per rung. Pending Q12 |
-| Q11 | Can you export CODESYS LD POUs that use blocks (TON, CTU, R_TRIG), set/reset coils, edge contacts, and network comments? | Open; needed before M3 |
-| Q12 | Were the three CODESYS files exported by CODESYS, or generated (e.g. for import into CODESYS)? | Open |
+| Q11 | Can you export CODESYS LD POUs that use blocks (TON, CTU, R_TRIG), set/reset coils, edge contacts, and network comments? | Partly: the 2026-11-24 export covers TON, R_TRIG, CTU (with a contact on RESET). Still wanted: set/reset and negated coils, edge contacts, EN/ENO boxes, network comment text and titles |
+| Q12 | Were the three CODESYS files exported by CODESYS, or generated (e.g. for import into CODESYS)? | Likely generated: the direct export differs (one rail pair per POU, networktitle markers, no positions). Both shapes are supported. Confirm when convenient |
 | Q13 | Pull AOI pin labels (from pasted L5X definitions) into M2? | Done in M2 (cheap, and only used when the definition is in the block); say if it should come out |
 | Q14 | Does Studio 5000 draw trailing outputs against the right rail or right after the last input? | Right after the last input; `inline` is now the default (2026-11-24) |
 

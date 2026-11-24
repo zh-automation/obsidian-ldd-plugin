@@ -1,7 +1,7 @@
 /**
  * Geometry -> SVG. Plain DOM APIs only; all text goes through textContent.
  */
-import type { Geometry, Prim } from "../layout/layout";
+import type { Geometry, Prim, Symbols } from "../layout/layout";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -26,7 +26,7 @@ export function renderGeometry(doc: Document, g: Geometry, ariaLabel: string): S
 		role: "img",
 		"aria-label": ariaLabel,
 	});
-	for (const p of g.prims) root.appendChild(renderPrim(doc, p));
+	for (const p of g.prims) root.appendChild(renderPrim(doc, p, g.symbols));
 	return root;
 }
 
@@ -39,7 +39,7 @@ function withTip(doc: Document, tip: string, cls: string, children: SVGElement[]
 	return group;
 }
 
-function renderPrim(doc: Document, p: Prim): SVGElement {
+function renderPrim(doc: Document, p: Prim, symbols: Symbols): SVGElement {
 	switch (p.t) {
 		case "line":
 			return svgEl(doc, "line", { class: `ldd-${p.cls}`, x1: r(p.x1), y1: r(p.y1), x2: r(p.x2), y2: r(p.y2) });
@@ -53,7 +53,12 @@ function renderPrim(doc: Document, p: Prim): SVGElement {
 				svgEl(doc, "rect", { class: "ldd-box", x: r(p.x), y: r(p.y), width: r(p.w), height: r(p.h), rx: 2 }),
 			]);
 		case "contact":
-			return withTip(doc, p.tip, "ldd-instr", contactShapes(doc, p.x, p.y, p.w, p.variant, p.label));
+			return withTip(
+				doc,
+				p.tip,
+				"ldd-instr",
+				symbols === "iec" ? iecContactShapes(doc, p.x, p.y, p.w, p.variant, p.label) : contactShapes(doc, p.x, p.y, p.w, p.variant, p.label),
+			);
 		case "coil":
 			return withTip(doc, p.tip, "ldd-instr", coilShapes(doc, p.x, p.y, p.w, p.label));
 	}
@@ -83,7 +88,22 @@ function contactShapes(doc: Document, x: number, y: number, w: number, variant?:
 	return shapes;
 }
 
-/** Rockwell coil: ( ) with optional inner text (L, U, RES, JMP). */
+/** IEC contact: | |  with a slash (negated) or inner text (P, N for edge contacts). */
+function iecContactShapes(doc: Document, x: number, y: number, w: number, variant?: string, label?: string): SVGElement[] {
+	const xl = x + BAR;
+	const xr = x + w - BAR;
+	const shapes: SVGElement[] = [
+		svgEl(doc, "path", { class: "ldd-sym", d: `M${r(x)} ${r(y)}H${r(xl)}M${r(xl)} ${r(y - HALF)}V${r(y + HALF)}` }),
+		svgEl(doc, "path", { class: "ldd-sym", d: `M${r(x + w)} ${r(y)}H${r(xr)}M${r(xr)} ${r(y - HALF)}V${r(y + HALF)}` }),
+	];
+	if (variant === "nc") {
+		shapes.push(svgEl(doc, "line", { class: "ldd-sym", x1: r(xl + 3), y1: r(y + HALF - 2), x2: r(xr - 3), y2: r(y - HALF + 2) }));
+	}
+	if (label) shapes.push(symText(doc, x + w / 2, y, label));
+	return shapes;
+}
+
+/** Coil: ( ) with optional inner text (L, U, RES, JMP; IEC S, R, P, N, /). Same in both styles. */
 function coilShapes(doc: Document, x: number, y: number, w: number, label?: string): SVGElement[] {
 	const shapes: SVGElement[] = [
 		svgEl(doc, "path", {

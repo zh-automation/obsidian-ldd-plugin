@@ -162,6 +162,11 @@ export function firstElement(el: XmlElement, name: string): XmlElement | undefin
 	return elements(el.children, name)[0];
 }
 
+/** All text under an element, nested markup included (XHTML comments use <p>, <br>, ...). */
+export function deepText(el: XmlElement): string {
+	return el.children.map((c) => (c.kind === "text" ? c.text : deepText(c))).join("");
+}
+
 /** Concatenated direct text of an element, with the offset of its first text node. */
 export function textContent(el: XmlElement): { text: string; start: number; cdata: boolean } {
 	const texts = el.children.filter((c): c is XmlText => c.kind === "text");

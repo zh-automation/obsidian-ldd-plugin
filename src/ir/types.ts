@@ -34,6 +34,12 @@ export interface Series {
 export interface Parallel {
 	kind: "parallel";
 	legs: Series[];
+	/**
+	 * IEC blocks with more than one power-flow input (CTU's CU and RESET both fed by contacts): the
+	 * legs do not join; leg i feeds input pin pins[i] of the block that follows in the series.
+	 * Leg 0 feeds the block's main power input.
+	 */
+	pins?: string[];
 }
 
 export type InstrShape = "contact" | "coil" | "box";
@@ -52,6 +58,13 @@ export interface Instr {
 	title?: string;
 	/** Input (condition) or output instruction. Undefined: contacts are inputs, everything else outputs. */
 	role?: "input" | "output";
+	/**
+	 * "iec": an IEC function block drawn with input pins on the left and output pins on the right
+	 * (operands = inputs, outPins = outputs, values outside the box). Otherwise a Logix-style box.
+	 */
+	form?: "iec";
+	/** IEC function block instance name, drawn above the box. */
+	instance?: string;
 	/** Positional (Logix) or named (IEC block pins) operands. */
 	operands: Operand[];
 	/** Right-side status or output pins (EN, DN, Q, ET). */
@@ -68,4 +81,6 @@ export interface Operand {
 	value: string;
 	/** Kept for tooltips but not drawn as a box row (e.g. the JSR input count). */
 	hidden?: boolean;
+	/** IEC block pin that carries rung power (drawn as a wire, no value). */
+	power?: boolean;
 }

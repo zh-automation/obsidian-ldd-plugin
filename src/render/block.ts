@@ -8,6 +8,7 @@ import type { FrontEndResult, Section } from "../parsers/common";
 import { parseL5K } from "../parsers/l5k";
 import { parseL5X } from "../parsers/l5x";
 import { parseNeutralText } from "../parsers/neutralText";
+import { parsePLCopen } from "../parsers/plcopen";
 import { renderGeometry } from "./svg";
 
 export interface BlockError {
@@ -18,18 +19,7 @@ export interface BlockError {
 	message: string;
 }
 
-const FORMAT_LABELS: Record<Format, string> = {
-	neutral: "Studio 5000 neutral text",
-	l5x: "L5X rungs",
-	l5k: "L5K routine text",
-	plcopen: "PLCopen XML",
-};
-
-const PENDING: Partial<Record<Format, string>> = {
-	plcopen: "M3",
-};
-
-function parseBody(format: Format, body: string): FrontEndResult | undefined {
+function parseBody(format: Format, body: string): FrontEndResult {
 	switch (format) {
 		case "neutral": {
 			const r = parseNeutralText(body);
@@ -39,8 +29,8 @@ function parseBody(format: Format, body: string): FrontEndResult | undefined {
 			return parseL5X(body);
 		case "l5k":
 			return parseL5K(body);
-		default:
-			return undefined;
+		case "plcopen":
+			return parsePLCopen(body);
 	}
 }
 
@@ -59,23 +49,20 @@ export function renderBlock(source: string, el: HTMLElement): void {
 	const errors: BlockError[] = [...split.errors];
 
 	const parsed = parseBody(format, body);
-	for (const e of parsed?.errors ?? []) errors.push({ line: e.line + bodyLineOffset, col: e.col, message: e.message });
+	for (const e of parsed.errors) errors.push({ line: e.line + bodyLineOffset, col: e.col, message: e.message });
 
 	if (errors.length > 0) root.appendChild(renderErrors(doc, errors, source));
-	for (const n of parsed?.notices ?? []) root.appendChild(note(doc, n));
+	for (const n of parsed.notices) root.appendChild(note(doc, n));
 
-	const pending = PENDING[format];
-	if (pending || !parsed) {
-		root.appendChild(note(doc, `${FORMAT_LABELS[format]} detected. Rendering for this format arrives in ${pending ?? "a later version"}.`));
-		return;
-	}
 	if (parsed.sections.length === 0) {
 		if (errors.length === 0 && parsed.notices.length === 0) root.appendChild(note(doc, "No rungs found."));
 		return;
 	}
 
-	const style = styleFor(header);
-	const start = header.start ?? 0;
+	const style = styleFor(header, format);
+	root.dataset.style = style.symbols;
+	// CODESYS numbers networks from 1; Logix numbers rungs from 0.
+	const start = header.start ?? (format === "plcopen" ? 1 : 0);
 	for (const section of parsed.sections) renderSection(doc, root, section, start, style);
 }
 
@@ -100,10 +87,18 @@ function renderSection(doc: Document, root: HTMLElement, section: Section, start
 	root.appendChild(renderGeometry(doc, geometry, label));
 }
 
-function styleFor(header: BlockHeader): Partial<LayoutStyle> {
-	const style: Partial<LayoutStyle> = {};
+/**
+ * Drawing style: IEC symbols for PLCopen and Rockwell symbols for the Logix formats (D2), unless
+ * the header says otherwise. Outputs follow the last input in Rockwell style (Studio 5000, Q14)
+ * and sit against the right rail in IEC style (CODESYS).
+ */
+function styleFor(header: BlockHeader, format: Format): Partial<LayoutStyle> & Pick<LayoutStyle, "symbols"> {
+	const symbols = header.style ?? (format === "plcopen" ? "iec" : "rockwell");
+	const style: Partial<LayoutStyle> & Pick<LayoutStyle, "symbols"> = {
+		symbols,
+		align: header.align ?? (symbols === "iec" ? "right" : "inline"),
+	};
 	if (header.numbers !== undefined) style.numbers = header.numbers;
-	if (header.align !== undefined) style.align = header.align;
 	return style;
 }
 

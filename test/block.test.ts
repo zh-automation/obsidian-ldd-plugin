@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { caretSnippet, renderBlock } from "../src/render/block";
 import { NEUTRAL } from "./fixtures/neutral";
+import { PLCOPEN } from "./fixtures/plcopen";
 import { L5K, L5X } from "./fixtures/rockwell";
 
 function render(source: string): HTMLElement {
@@ -53,11 +54,27 @@ describe("renderBlock", () => {
 		expect(el.querySelector("svg")).not.toBeNull();
 	});
 
-	it("shows a note for formats that arrive in later milestones", () => {
-		const el = render("<LD><leftPowerRail localId=\"1\"/></LD>");
+	it("renders PLCopen in IEC style, networks numbered from 1, coils at the right rail", () => {
+		const el = render(PLCOPEN.P3_blocks);
 		expect(block(el).dataset.format).toBe("plcopen");
-		expect(el.querySelector(".ldd-note")?.textContent).toContain("M3");
-		expect(el.querySelector("svg")).toBeNull();
+		expect(block(el).dataset.style).toBe("iec");
+		expect([...el.querySelectorAll("text.ldd-num")].map((t) => t.textContent)).toEqual(["1", "2"]);
+		expect(el.querySelector("text.ldd-comment")?.textContent).toBe("Start delay");
+		// IEC contacts are two straight bars: no hooks, so each half is a single M..H..M..V path.
+		const contactPath = el.querySelector("g.ldd-instr path")?.getAttribute("d") ?? "";
+		expect(contactPath).toMatch(/^M[\d.]+ [\d.]+H[\d.]+M[\d.]+ [\d.]+V[\d.]+$/);
+	});
+
+	it("lets the header switch PLCopen to Rockwell symbols and inline outputs", () => {
+		const el = render(`---\nstyle: rockwell\nstart: 0\n---\n${PLCOPEN.P1_contact_coil}`);
+		expect(block(el).dataset.style).toBe("rockwell");
+		expect(el.querySelector("text.ldd-num")?.textContent).toBe("0");
+	});
+
+	it("shows PLCopen network errors with their block line", () => {
+		const el = render(`---\nnumbers: on\n---\n${PLCOPEN.P6_bridge}`);
+		expect(el.querySelector(".ldd-error-item")?.firstChild?.textContent).toMatch(/^Line 6, col 1: The network is not series-parallel/);
+		expect(el.querySelectorAll("svg line.ldd-err-wire")).toHaveLength(1);
 	});
 
 	it("renders L5K routine text", () => {

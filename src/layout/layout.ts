@@ -29,7 +29,11 @@ export interface LayoutStyle {
 	numbers: boolean;
 	/** "inline": outputs follow the last input, then a wire to the right rail (Studio 5000). "right": trailing outputs sit against the right rail. */
 	align: Align;
+	/** Contact symbol style: Rockwell "] [" or IEC "| |". */
+	symbols: Symbols;
 }
+
+export type Symbols = "rockwell" | "iec";
 
 /** Defaults assume a 12px monospace font (about 0.6em per character). */
 export const DEFAULT_STYLE: LayoutStyle = {
@@ -48,6 +52,7 @@ export const DEFAULT_STYLE: LayoutStyle = {
 	boxPadY: 4,
 	numbers: true,
 	align: "inline",
+	symbols: "rockwell",
 };
 
 export type TextClass =
@@ -60,6 +65,7 @@ export type TextClass =
 	| "box-name"
 	| "box-text"
 	| "pin"
+	| "instance"
 	| "err-text";
 export type LineClass = "wire" | "rail" | "err-wire";
 
@@ -74,6 +80,7 @@ export interface Geometry {
 	width: number;
 	height: number;
 	prims: Prim[];
+	symbols: Symbols;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -99,7 +106,29 @@ interface MInstr {
 	nameChars: number;
 	pins: string[];
 	pinW: number;
+	/** IEC function block geometry (node.form === "iec"). */
+	iec?: IecBox;
 }
+
+interface IecPin {
+	name: string;
+	value: string;
+	power: boolean;
+	/** Row y relative to the rung wire (the block's main power pin is 0). */
+	dy: number;
+}
+
+interface IecBox {
+	ins: IecPin[];
+	outs: IecPin[];
+	/** Width left of the box (input values and lead-in wire) and right of it (output values). */
+	leftW: number;
+	rightW: number;
+	/** Box top relative to the element top. */
+	boxTop: number;
+	boxH: number;
+}
+
 interface MSeries {
 	kind: "series";
 	w: number;
@@ -113,6 +142,10 @@ interface MParallel {
 	h: number;
 	a: number;
 	legs: MSeries[];
+	/** Legs feed these pins of the IEC block after this parallel instead of joining. */
+	pins?: string[];
+	/** For pin legs: the y of each target pin relative to the rung wire (set by the series). */
+	targets?: number[];
 }
 type Measured = MInstr | MSeries | MParallel;
 
@@ -133,14 +166,37 @@ function measure(node: Node, s: LayoutStyle): Measured {
 			const legs = node.legs.map((l) => measureSeries(l, s));
 			const inner = Math.max(0, ...legs.map((l) => l.w));
 			const h = legs.reduce((sum, l) => sum + l.h, 0) + s.legGap * Math.max(0, legs.length - 1);
-			return { kind: "parallel", w: inner + 2 * s.branchStub, h, a: legs[0]?.a ?? EMPTY_LEG_A, legs };
+			const m: MParallel = { kind: "parallel", w: inner + 2 * s.branchStub, h, a: legs[0]?.a ?? EMPTY_LEG_A, legs };
+			if (node.pins) m.pins = node.pins;
+			return m;
 		}
 	}
+}
+
+/** Wire y of each leg of a parallel, relative to the parallel's anchor. */
+function legOffsets(p: MParallel, s: LayoutStyle): number[] {
+	let top = 0;
+	return p.legs.map((leg) => {
+		const y = top + leg.a - p.a;
+		top += leg.h + s.legGap;
+		return y;
+	});
 }
 
 function measureSeries(node: Series, s: LayoutStyle): MSeries {
 	if (node.items.length === 0) return { kind: "series", w: 0, h: EMPTY_LEG_H, a: EMPTY_LEG_A, kids: [] };
 	const kids = node.items.map((n) => measure(n, s));
+	// Legs that feed different pins of the next IEC block: stretch the block so each pin lines up
+	// with its leg, and remember where each leg has to end.
+	kids.forEach((k, i) => {
+		const next = kids[i + 1];
+		if (k.kind !== "parallel" || !k.pins || next?.kind !== "instr" || next.node.form !== "iec") return;
+		const offsets = legOffsets(k, s);
+		const want = new Map(k.pins.map((p, j) => [p, offsets[j] ?? 0]));
+		const box = measureIecBox(next.node, s, want);
+		kids[i + 1] = box;
+		k.targets = k.pins.map((p) => box.iec?.ins.find((pin) => pin.name === p)?.dy ?? 0);
+	});
 	const a = Math.max(...kids.map((k) => k.a));
 	const h = Math.max(...kids.map((k) => a - k.a + k.h));
 	const w = kids.reduce((sum, k) => sum + k.w, 0);
@@ -152,7 +208,59 @@ function operandText(instr: Instr, i: number): string {
 	return v === "" ? "?" : v;
 }
 
+const noBox = () => ({ boxW: 0, boxH: 0, rows: [] as BoxRow[], nameChars: 0, pins: [] as string[], pinW: 0 });
+
+/**
+ * IEC function block: type name at the top, instance name above, input pins on the left and
+ * outputs on the right with their values outside the box. The main power pins sit on the rung
+ * wire; `want` places extra power-input pins at the y of the legs that feed them.
+ */
+function measureIecBox(node: Instr, s: LayoutStyle, want: ReadonlyMap<string, number> = new Map()): MInstr {
+	const ins: IecPin[] = [];
+	let dy = -s.lineH;
+	for (const o of node.operands) {
+		if (o.hidden) continue;
+		const natural = dy + s.lineH;
+		dy = want.has(o.name ?? "") ? Math.max(natural, want.get(o.name ?? "") ?? natural) : natural;
+		ins.push({ name: o.name ?? "", value: o.value, power: o.power === true, dy });
+	}
+	const outs: IecPin[] = (node.outPins ?? []).map((o, j) => ({ name: o.name ?? "", value: o.value, power: o.power === true, dy: j * s.lineH }));
+	const maxDy = Math.max(0, ...ins.map((p) => p.dy), ...outs.map((p) => p.dy));
+
+	const inChars = Math.max(0, ...ins.map((p) => p.name.length));
+	const outChars = Math.max(0, ...outs.map((p) => p.name.length));
+	const inner = Math.max(node.op.length, inChars + (inChars && outChars ? 2 : 0) + outChars);
+	const boxW = Math.max(56, inner * s.charW + 2 * s.boxPadX);
+	const valW = (pins: IecPin[]) => {
+		const chars = Math.max(0, ...pins.filter((p) => !p.power).map((p) => p.value.length));
+		return chars > 0 ? chars * s.charW + 2 * PIN_STUB + 4 : 2 * PIN_STUB;
+	};
+	const leftW = valW(ins);
+	const rightW = valW(outs);
+
+	const instH = node.instance ? s.lineH : 0;
+	const boxTop = BOX_MARGIN_TOP + instH;
+	const a = boxTop + s.boxPadY + s.lineH + s.lineH / 2;
+	const boxH = s.boxPadY + s.lineH + maxDy + s.lineH + s.boxPadY;
+	const instChars = node.instance?.length ?? 0;
+	const w = Math.max(leftW + boxW + rightW, instChars * s.charW) + 2 * s.elemPadX;
+	return {
+		kind: "instr",
+		node,
+		w,
+		h: boxTop + boxH + BOX_MARGIN_BOTTOM,
+		a,
+		labelLines: [],
+		symW: 0,
+		...noBox(),
+		boxW,
+		boxH,
+		iec: { ins, outs, leftW, rightW, boxTop, boxH },
+	};
+}
+
 function measureInstr(node: Instr, s: LayoutStyle): MInstr {
+	if (node.form === "iec") return measureIecBox(node, s);
 	if (node.shape === "box") {
 		const rows: BoxRow[] = node.operands.flatMap((o) => {
 			if (o.hidden) return [];
@@ -211,11 +319,19 @@ function measureInstr(node: Instr, s: LayoutStyle): MInstr {
 // Placement
 
 function tipOf(instr: Instr): string {
+	if (instr.form === "iec") {
+		const pins = [
+			...instr.operands.filter((o) => !o.power).map((o) => `${o.name}:=${o.value || "?"}`),
+			...(instr.outPins ?? []).filter((o) => !o.power && o.value).map((o) => `${o.name}=>${o.value}`),
+		];
+		return `${instr.instance ? `${instr.instance} : ` : ""}${instr.op}(${pins.join(", ")})`;
+	}
 	return `${instr.op}(${instr.operands.map((o) => o.value).join(",")})`;
 }
 
 function wire(out: Prim[], x1: number, x2: number, y: number): void {
-	if (x2 > x1) out.push({ t: "line", cls: "wire", x1, y1: y, x2, y2: y });
+	// Ignore slivers left by floating-point sums.
+	if (x2 - x1 > 0.05) out.push({ t: "line", cls: "wire", x1, y1: y, x2, y2: y });
 }
 
 function place(m: Measured, x: number, top: number, availW: number, s: LayoutStyle, out: Prim[]): void {
@@ -237,18 +353,28 @@ function place(m: Measured, x: number, top: number, availW: number, s: LayoutSty
 			let legTop = top;
 			const ys: number[] = [];
 			const innerW = m.w - 2 * s.branchStub;
-			for (const leg of m.legs) {
+			const toPins = m.targets !== undefined;
+			const bendX = x + m.w - s.branchStub / 2;
+			m.legs.forEach((leg, j) => {
 				const y = legTop + leg.a;
 				ys.push(y);
 				wire(out, x, x + s.branchStub, y);
 				place(leg, x + s.branchStub, legTop, innerW, s, out);
-				wire(out, x + m.w - s.branchStub, x + m.w, y);
+				const target = toPins ? wireY + (m.targets?.[j] ?? 0) : y;
+				if (target === y) {
+					wire(out, x + m.w - s.branchStub, x + m.w, y);
+				} else {
+					// Leg feeds a block pin at another height: bend to it.
+					wire(out, x + m.w - s.branchStub, bendX, y);
+					out.push({ t: "line", cls: "wire", x1: bendX, y1: y, x2: bendX, y2: target });
+					wire(out, bendX, x + m.w, target);
+				}
 				legTop += leg.h + s.legGap;
-			}
+			});
 			const y0 = ys[0] ?? wireY;
 			const yN = ys[ys.length - 1] ?? wireY;
 			out.push({ t: "line", cls: "wire", x1: x, y1: y0, x2: x, y2: yN });
-			out.push({ t: "line", cls: "wire", x1: x + m.w, y1: y0, x2: x + m.w, y2: yN });
+			if (!toPins) out.push({ t: "line", cls: "wire", x1: x + m.w, y1: y0, x2: x + m.w, y2: yN });
 			break;
 		}
 	}
@@ -259,6 +385,11 @@ function placeInstr(m: MInstr, x: number, top: number, s: LayoutStyle, out: Prim
 	const node = m.node;
 	const wireY = top + m.a;
 	const tip = tipOf(node);
+
+	if (m.iec) {
+		placeIecBox(m, m.iec, x, top, wireY, tip, s, out);
+		return;
+	}
 
 	if (node.shape === "box") {
 		const bx = x + s.elemPadX;
@@ -302,6 +433,42 @@ function placeInstr(m: MInstr, x: number, top: number, s: LayoutStyle, out: Prim
 	m.labelLines.forEach((line, i) => {
 		out.push({ t: "text", cls: "tag", x: cx, y: top + i * s.lineH + s.lineH - 3, text: line, anchor: "middle" });
 	});
+}
+
+function placeIecBox(m: MInstr, b: IecBox, x: number, top: number, wireY: number, tip: string, s: LayoutStyle, out: Prim[]): void {
+	const node = m.node;
+	const bx = x + s.elemPadX + b.leftW;
+	const by = top + b.boxTop;
+	const right = bx + m.boxW;
+	out.push({ t: "box", x: bx, y: by, w: m.boxW, h: b.boxH, tip });
+	if (node.instance) {
+		out.push({ t: "text", cls: "instance", x: bx + m.boxW / 2, y: by - 4, text: node.instance, anchor: "middle" });
+	}
+	out.push({ t: "text", cls: "box-title", x: bx + m.boxW / 2, y: by + s.boxPadY + s.lineH - 3, text: node.op, anchor: "middle" });
+
+	for (const p of b.ins) {
+		const y = wireY + p.dy;
+		out.push({ t: "text", cls: "box-name", x: bx + s.boxPadX, y: y + 4, text: p.name, anchor: "start" });
+		if (p.power) {
+			wire(out, x, bx, y);
+		} else if (p.value !== "") {
+			wire(out, bx - PIN_STUB, bx, y);
+			out.push({ t: "text", cls: "box-text", x: bx - PIN_STUB - 3, y: y + 4, text: p.value, anchor: "end" });
+		}
+	}
+	let powerOut = false;
+	for (const p of b.outs) {
+		const y = wireY + p.dy;
+		out.push({ t: "text", cls: "box-name", x: right - s.boxPadX, y: y + 4, text: p.name, anchor: "end" });
+		if (p.power && p.dy === 0) {
+			powerOut = true;
+		} else if (p.value !== "") {
+			wire(out, right, right + PIN_STUB, y);
+			out.push({ t: "text", cls: "box-text", x: right + PIN_STUB + 3, y: y + 4, text: p.value, anchor: "start" });
+		}
+	}
+	// The rung continues from the power output (or the box edge when there is none).
+	if (powerOut || b.outs.length === 0) wire(out, right, x + m.w, wireY);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -411,7 +578,7 @@ export function layoutRungs(rungs: Rung[], style: Partial<LayoutStyle> = {}): Ge
 	out.push({ t: "line", cls: "rail", x1: railL, y1: 2, x2: railL, y2: bottom });
 	out.push({ t: "line", cls: "rail", x1: railR, y1: 2, x2: railR, y2: bottom });
 
-	return { width: Math.ceil(railR + 6), height: Math.ceil(bottom + 4), prims: out };
+	return { width: Math.ceil(railR + 6), height: Math.ceil(bottom + 4), prims: out, symbols: s.symbols };
 }
 
 // ---------------------------------------------------------------------------------------------

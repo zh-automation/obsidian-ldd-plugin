@@ -46,7 +46,8 @@
 
 .ldd-box-desc,
 .ldd-box-name,
-.ldd-pin {
+.ldd-pin,
+.ldd-instance {
 	fill: var(--text-muted);
 }
 

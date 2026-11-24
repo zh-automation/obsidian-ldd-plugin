@@ -10,6 +10,7 @@ import path from "node:path";
 import { Window } from "happy-dom";
 import { renderBlock } from "../src/render/block";
 import { NEUTRAL } from "../test/fixtures/neutral";
+import { PLCOPEN } from "../test/fixtures/plcopen";
 import { L5K, L5X } from "../test/fixtures/rockwell";
 
 const OUT_DIR = ".preview";
@@ -48,6 +49,7 @@ sections.push(
 );
 for (const [name, src] of Object.entries(L5X)) sections.push(block(name, src));
 for (const [name, src] of Object.entries(L5K)) sections.push(block(name, src));
+for (const [name, src] of Object.entries(PLCOPEN)) sections.push(block(name, src, false));
 sections.push(
 	block(
 		"Multi-rung block with header and comments",
@@ -80,6 +82,10 @@ if (withSamples) {
 			const picked = [...rungs].sort((a, b) => score(b) - score(a)).slice(0, 4);
 			picked.push(...rungs.filter((r) => r.length < 120).slice(0, 2));
 			sections.push(block(`${path.basename(file)} (most complex + short)`, picked.join("\n"), false));
+		}
+		// PLCopen exports are small enough to render whole.
+		for (const file of walk(dir).filter((f) => /\.xml$/i.test(f))) {
+			sections.push(block(path.basename(file), readFileSync(file, "utf8").replace(/^﻿/, ""), false));
 		}
 	}
 }

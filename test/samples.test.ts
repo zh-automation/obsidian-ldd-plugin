@@ -13,6 +13,7 @@ import { layoutRungs } from "../src/layout/layout";
 import type { FrontEndResult } from "../src/parsers/common";
 import { parseL5K } from "../src/parsers/l5k";
 import { parseL5X } from "../src/parsers/l5x";
+import { parsePLCopen } from "../src/parsers/plcopen";
 
 const SAMPLES = fileURLToPath(new URL("../reference/samples", import.meta.url));
 
@@ -34,10 +35,12 @@ function instrs(n: Node): Instr[] {
 	return n.legs.flatMap(instrs);
 }
 
-const files = existsSync(SAMPLES) ? walk(SAMPLES).filter((f) => /\.(l5x|l5k)$/i.test(f)) : [];
+const everything = existsSync(SAMPLES) ? walk(SAMPLES) : [];
+const files = everything.filter((f) => /\.(l5x|l5k)$/i.test(f));
+const xmlFiles = everything.filter((f) => /\.xml$/i.test(f));
 const results = new Map<string, FrontEndResult>();
 
-describe.skipIf(files.length === 0)("real Rockwell samples", () => {
+describe.skipIf(everything.length === 0)("real samples", () => {
 	for (const file of files) {
 		const name = path.basename(file);
 		const ext = path.extname(file).toLowerCase();
@@ -69,6 +72,39 @@ describe.skipIf(files.length === 0)("real Rockwell samples", () => {
 				`${name}: ${r.sections.length} sections, ${rungs.length} rungs, ${rungs.filter((g) => g.comment).length} comments, ` +
 					`${boxes.length} boxes (${named.length} with operand names), parse ${(t1 - t0).toFixed(1)} ms, ` +
 					`layout ${(t2 - t1).toFixed(1)} ms, ${prims} prims; ${r.notices.join(" ")}`,
+			);
+		});
+	}
+
+	for (const file of xmlFiles) {
+		const name = path.basename(file);
+		it(`${name}: every LD network reduces and lays out`, () => {
+			const text = readFileSync(file, "utf8").replace(/^﻿/, "");
+			const t0 = performance.now();
+			const r = parsePLCopen(text);
+			const t1 = performance.now();
+			expect(r.errors.map((e) => `line ${e.line}, col ${e.col}: ${e.message}`)).toEqual([]);
+
+			// Independent count: CODESYS networktitle markers, else one right rail per rung.
+			const titles = text.match(/>networktitle</g)?.length ?? 0;
+			const expected = titles > 0 ? titles : (text.match(/<rightPowerRail\b/g)?.length ?? 0);
+			const rungs = r.sections.flatMap((s) => s.rungs);
+			expect(rungs.length).toBe(expected);
+			expect(rungs.filter((g) => g.error)).toHaveLength(0);
+
+			let prims = 0;
+			for (const s of r.sections) {
+				const g = layoutRungs(s.rungs.map((g2, i) => ({ ...g2, number: i + 1 })), { symbols: "iec", align: "right" });
+				const bad = g.prims.filter((p) => Object.values(p).some((v) => typeof v === "number" && !Number.isFinite(v)));
+				expect(bad).toHaveLength(0);
+				prims += g.prims.length;
+			}
+			const all = rungs.flatMap((g) => instrs(g.body));
+			const blocks = all.filter((i) => i.form === "iec");
+			console.info(
+				`${name}: ${r.sections.length} sections, ${rungs.length} networks, ${all.length} elements, ${blocks.length} blocks ` +
+					`(${blocks.filter((b) => b.operands.filter((o) => o.power).length > 1).length} with two power inputs), ` +
+					`parse ${(t1 - t0).toFixed(1)} ms, ${prims} prims; ${r.notices.join(" ")}`,
 			);
 		});
 	}
