@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { caretSnippet, renderBlock } from "../src/render/block";
 import { NEUTRAL } from "./fixtures/neutral";
+import { L5K, L5X } from "./fixtures/rockwell";
 
 function render(source: string): HTMLElement {
 	const el = document.createElement("div");
@@ -53,10 +54,43 @@ describe("renderBlock", () => {
 	});
 
 	it("shows a note for formats that arrive in later milestones", () => {
-		const el = render("---\nformat: l5k\n---\nN: XIC(A)OTE(B);");
-		expect(block(el).dataset.format).toBe("l5k");
-		expect(el.querySelector(".ldd-note")?.textContent).toContain("M2");
+		const el = render("<LD><leftPowerRail localId=\"1\"/></LD>");
+		expect(block(el).dataset.format).toBe("plcopen");
+		expect(el.querySelector(".ldd-note")?.textContent).toContain("M3");
 		expect(el.querySelector("svg")).toBeNull();
+	});
+
+	it("renders L5K routine text", () => {
+		const el = render(L5K.K2_comment_escapes);
+		expect(block(el).dataset.format).toBe("l5k");
+		expect(el.querySelector("svg")?.getAttribute("aria-label")).toBe("Ladder diagram, 1 rung");
+		expect(el.querySelector("text.ldd-comment")?.textContent).toBe("Pump permissive");
+	});
+
+	it("renders a full L5X document as titled sections with a notice for skipped routines", () => {
+		const el = render(L5X.X3_full_document);
+		expect(block(el).dataset.format).toBe("l5x");
+		expect([...el.querySelectorAll(".ldd-section-title")].map((t) => t.textContent)).toEqual([
+			"Valve_AOI / Logic",
+			"MainProgram / MainRoutine",
+			"MainProgram / Empty",
+		]);
+		expect(el.querySelectorAll("svg")).toHaveLength(2);
+		const notes = [...el.querySelectorAll(".ldd-note")].map((n) => n.textContent);
+		expect(notes).toEqual(["Skipped 2 non-ladder routines (1 ST, 1 FBD).", "No rungs."]);
+		expect(el.querySelectorAll("svg")[1]?.getAttribute("aria-label")).toBe("Ladder diagram, MainProgram / MainRoutine, 2 rungs");
+	});
+
+	it("keeps L5X rung numbers and maps L5X errors to block lines below the header", () => {
+		expect([...render(L5X.X2_rll_content).querySelectorAll("text.ldd-num")].map((t) => t.textContent)).toEqual([
+			"0",
+			"1",
+			"2",
+		]);
+		const el = render(`---\nnumbers: on\n---\n${L5X.X7_bad_rung_text}`);
+		expect(el.querySelector(".ldd-error-item")?.firstChild?.textContent).toBe(
+			"Line 6, col 16: Unexpected ']' with no matching '['.",
+		);
 	});
 
 	it("shows a note for an empty block", () => {

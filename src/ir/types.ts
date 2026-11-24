@@ -18,6 +18,8 @@ export interface Rung {
 	span?: SourceSpan;
 	/** Set when the rung could not be parsed; body is then empty. */
 	error?: string;
+	/** Rung type code from L5X/L5K when not a normal rung ('N'), e.g. pending or test edits. */
+	type?: string;
 }
 
 export type Node = Series | Parallel | Instr;
@@ -46,6 +48,10 @@ export interface Instr {
 	variant?: InstrVariant;
 	/** Text drawn inside a contact or coil symbol ('L', 'U', 'ONS', 'RES'). */
 	label?: string;
+	/** Box description shown after the mnemonic ('Timer On Delay'). */
+	title?: string;
+	/** Input (condition) or output instruction. Undefined: contacts are inputs, everything else outputs. */
+	role?: "input" | "output";
 	/** Positional (Logix) or named (IEC block pins) operands. */
 	operands: Operand[];
 	/** Right-side status or output pins (EN, DN, Q, ET). */
@@ -60,4 +66,6 @@ export interface Instr {
 export interface Operand {
 	name?: string;
 	value: string;
+	/** Kept for tooltips but not drawn as a box row (e.g. the JSR input count). */
+	hidden?: boolean;
 }

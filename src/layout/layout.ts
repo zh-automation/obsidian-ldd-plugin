@@ -50,7 +50,17 @@ export const DEFAULT_STYLE: LayoutStyle = {
 	align: "inline",
 };
 
-export type TextClass = "tag" | "num" | "comment" | "box-title" | "box-text" | "err-text";
+export type TextClass =
+	| "tag"
+	| "num"
+	| "badge"
+	| "comment"
+	| "box-title"
+	| "box-desc"
+	| "box-name"
+	| "box-text"
+	| "pin"
+	| "err-text";
 export type LineClass = "wire" | "rail" | "err-wire";
 
 export type Prim =
@@ -69,6 +79,11 @@ export interface Geometry {
 // ---------------------------------------------------------------------------------------------
 // Measurement
 
+interface BoxRow {
+	name?: string;
+	value: string;
+}
+
 interface MInstr {
 	kind: "instr";
 	node: Instr;
@@ -78,7 +93,12 @@ interface MInstr {
 	labelLines: string[];
 	symW: number;
 	boxW: number;
-	rows: string[];
+	boxH: number;
+	rows: BoxRow[];
+	/** Width of the operand-name column in characters (0 when rows are unnamed). */
+	nameChars: number;
+	pins: string[];
+	pinW: number;
 }
 interface MSeries {
 	kind: "series";
@@ -97,6 +117,7 @@ interface MParallel {
 type Measured = MInstr | MSeries | MParallel;
 
 const LABEL_GAP = 3;
+const PIN_STUB = 6;
 const BOX_MARGIN_TOP = 4;
 const BOX_MARGIN_BOTTOM = 6;
 const EMPTY_LEG_A = 8;
@@ -133,24 +154,38 @@ function operandText(instr: Instr, i: number): string {
 
 function measureInstr(node: Instr, s: LayoutStyle): MInstr {
 	if (node.shape === "box") {
-		const rows = node.operands.map((_, i) => operandText(node, i));
-		const textChars = Math.max(node.op.length, ...rows.map((r) => r.length));
-		const boxW = Math.max(56, textChars * s.charW + 2 * s.boxPadX);
-		const boxH = (1 + rows.length) * s.lineH + 2 * s.boxPadY;
+		const rows: BoxRow[] = node.operands.flatMap((o) => {
+			if (o.hidden) return [];
+			const value = o.value === "" ? "?" : o.value;
+			return [o.name ? { name: o.name, value } : { value }];
+		});
+		const nameChars = Math.max(0, ...rows.map((r) => r.name?.length ?? 0));
+		const valueChars = Math.max(0, ...rows.map((r) => r.value.length));
+		const rowChars = nameChars > 0 ? nameChars + 2 + valueChars : valueChars;
+		const titleChars = node.op.length + (node.title ? 2 + node.title.length : 0);
+		const boxW = Math.max(56, Math.max(titleChars, rowChars) * s.charW + 2 * s.boxPadX);
+		const pins = (node.outPins ?? []).map((p) => p.name ?? p.value);
+		const pinW = pins.length > 0 ? (Math.max(...pins.map((p) => p.length)) + 2) * s.charW + 2 * PIN_STUB + 2 : 0;
+		const boxH = Math.max(1 + rows.length, pins.length) * s.lineH + 2 * s.boxPadY;
 		return {
 			kind: "instr",
 			node,
-			w: boxW + 2 * s.elemPadX,
+			w: boxW + pinW + 2 * s.elemPadX,
 			h: BOX_MARGIN_TOP + boxH + BOX_MARGIN_BOTTOM,
 			a: BOX_MARGIN_TOP + s.boxPadY + s.lineH / 2,
 			labelLines: [],
 			symW: 0,
 			boxW,
+			boxH,
 			rows,
+			nameChars,
+			pins,
+			pinW,
 		};
 	}
 	// Uniform cells (like the PLC editor) keep symbols in stacked branch legs vertically aligned.
-	const labelLines = wrapTag(operandText(node, 0), s.cellChars);
+	// Instructions without operands (MCR) get no tag label.
+	const labelLines = node.operands.length > 0 ? wrapTag(operandText(node, 0), s.cellChars) : [];
 	const inner = node.label ?? "";
 	const symW = inner.length > 1 ? Math.max(s.symW, inner.length * s.charW + 16) : s.symW;
 	const cellW = s.cellChars * s.charW + 8;
@@ -164,7 +199,11 @@ function measureInstr(node: Instr, s: LayoutStyle): MInstr {
 		labelLines,
 		symW,
 		boxW: 0,
+		boxH: 0,
 		rows: [],
+		nameChars: 0,
+		pins: [],
+		pinW: 0,
 	};
 }
 
@@ -224,15 +263,31 @@ function placeInstr(m: MInstr, x: number, top: number, s: LayoutStyle, out: Prim
 	if (node.shape === "box") {
 		const bx = x + s.elemPadX;
 		const by = top + BOX_MARGIN_TOP;
-		const bh = (1 + m.rows.length) * s.lineH + 2 * s.boxPadY;
+		const tx = bx + s.boxPadX;
 		wire(out, x, bx, wireY);
-		out.push({ t: "box", x: bx, y: by, w: m.boxW, h: bh, tip });
-		const textY = (row: number) => by + s.boxPadY + row * s.lineH + s.lineH - 3;
-		out.push({ t: "text", cls: "box-title", x: bx + m.boxW / 2, y: textY(0), text: node.op, anchor: "middle" });
+		out.push({ t: "box", x: bx, y: by, w: m.boxW, h: m.boxH, tip });
+		const rowMid = (row: number) => by + s.boxPadY + row * s.lineH + s.lineH / 2;
+		const textY = (row: number) => rowMid(row) + 4;
+		out.push({ t: "text", cls: "box-title", x: tx, y: textY(0), text: node.op, anchor: "start" });
+		if (node.title) {
+			out.push({ t: "text", cls: "box-desc", x: tx + (node.op.length + 2) * s.charW, y: textY(0), text: node.title, anchor: "start" });
+		}
+		const valueX = m.nameChars > 0 ? tx + (m.nameChars + 2) * s.charW : tx;
 		m.rows.forEach((r, i) => {
-			out.push({ t: "text", cls: "box-text", x: bx + s.boxPadX, y: textY(i + 1), text: r, anchor: "start" });
+			if (r.name) out.push({ t: "text", cls: "box-name", x: tx, y: textY(i + 1), text: r.name, anchor: "start" });
+			out.push({ t: "text", cls: "box-text", x: valueX, y: textY(i + 1), text: r.value, anchor: "start" });
 		});
-		wire(out, bx + m.boxW, x + m.w, wireY);
+		// Status pins: -(EN)- on the right edge, one per row; the rung continues from the first.
+		const px = bx + m.boxW;
+		m.pins.forEach((pin, i) => {
+			const y = rowMid(i);
+			const mid = px + m.pinW / 2;
+			const half = ((pin.length + 2) * s.charW) / 2 + 1;
+			wire(out, px, mid - half, y);
+			out.push({ t: "text", cls: "pin", x: mid, y: y + 4, text: `(${pin})`, anchor: "middle" });
+			wire(out, mid + half, px + m.pinW, y);
+		});
+		wire(out, px + m.pinW, x + m.w, wireY);
 		return;
 	}
 
@@ -255,7 +310,7 @@ function placeInstr(m: MInstr, x: number, top: number, s: LayoutStyle, out: Prim
 function isOutput(m: Measured): boolean {
 	switch (m.kind) {
 		case "instr":
-			return m.node.shape !== "contact";
+			return m.node.role ? m.node.role === "output" : m.node.shape !== "contact";
 		case "series":
 			return m.kids.length > 0 && m.kids.every(isOutput);
 		case "parallel":
@@ -285,7 +340,10 @@ export function layoutRungs(rungs: Rung[], style: Partial<LayoutStyle> = {}): Ge
 
 	const maxNum = Math.max(0, ...rungs.map((r) => r.number ?? 0));
 	const numW = s.numbers ? String(maxNum).length * s.charW + 14 : 6;
-	const railL = numW;
+	// Rung types other than N (pending or test edits) get a marker in the left margin.
+	const badgeChars = Math.max(0, ...rungs.map((r) => r.type?.length ?? 0));
+	const badgeW = badgeChars > 0 ? badgeChars * s.charW + 8 : 0;
+	const railL = numW + badgeW;
 	const innerW = Math.max(s.minInnerW, ...measured.map((m) => m.w + 2 * s.rungPadX));
 	const railR = railL + innerW;
 	const commentChars = Math.max(10, Math.floor((innerW - 2 * s.rungPadX) / s.charW));
@@ -341,6 +399,9 @@ export function layoutRungs(rungs: Rung[], style: Partial<LayoutStyle> = {}): Ge
 
 		if (s.numbers && rung.number !== undefined) {
 			out.push({ t: "text", cls: "num", x: railL - 6, y: wireY + 4, text: String(rung.number), anchor: "end" });
+		}
+		if (rung.type) {
+			out.push({ t: "text", cls: "badge", x: 4, y: wireY + 4, text: rung.type, anchor: "start" });
 		}
 
 		y += h + s.rungGap;

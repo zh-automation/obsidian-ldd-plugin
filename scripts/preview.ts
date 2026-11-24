@@ -10,6 +10,7 @@ import path from "node:path";
 import { Window } from "happy-dom";
 import { renderBlock } from "../src/render/block";
 import { NEUTRAL } from "../test/fixtures/neutral";
+import { L5K, L5X } from "../test/fixtures/rockwell";
 
 const OUT_DIR = ".preview";
 const withSamples = process.argv.includes("--samples");
@@ -30,6 +31,23 @@ function escapeHtml(s: string): string {
 
 const sections: string[] = [];
 for (const [name, src] of Object.entries(NEUTRAL)) sections.push(block(name, src));
+sections.push(
+	block(
+		"Instruction library: boxes, names, pins, v36 mnemonics",
+		[
+			"XIC(Run)TON(Motor_Delay,5000,0);",
+			"XIC(Count_PE)ONS(Count_Ons)CTU(Part_Count,100,0);",
+			"GEQ(Tank_01.Level,80.0)LIM(10,Tank_01.Temp,90)MOVE(0,Valve_02.Pos);",
+			"EQ(State,3)[ADD(Total,1,Total),CPT(Rate,Total/Elapsed*60.0)];",
+			"XIC(Trigger)MSG(Read_Msg);",
+			"XIC(Alarm_In)ALMD(Alarm_01,Ack_PB,Reset_PB,0,0);",
+			"JSR(Sub_01,0);",
+			"XIC(Enable)MCR();",
+		].join("\n"),
+	),
+);
+for (const [name, src] of Object.entries(L5X)) sections.push(block(name, src));
+for (const [name, src] of Object.entries(L5K)) sections.push(block(name, src));
 sections.push(
 	block(
 		"Multi-rung block with header and comments",

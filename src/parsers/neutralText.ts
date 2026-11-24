@@ -14,7 +14,7 @@
  * (so rung numbering stays aligned with the PLC), and continues.
  */
 import type { Instr, Node, Operand, Parallel, Rung, Series, SourceSpan } from "../ir/types";
-import { logixDef } from "../instructions/logix";
+import { applyLogixDef, type AoiTable } from "../instructions/logix";
 
 export interface ParseMessage {
 	/** 1-based line within the parsed text. */
@@ -29,8 +29,18 @@ export interface NeutralParseResult {
 	errors: ParseMessage[];
 }
 
-export function parseNeutralText(src: string): NeutralParseResult {
-	return new NeutralParser(src).parse();
+export interface NeutralParseOptions {
+	/** AOI definitions (from a pasted L5X) used to name AOI operands. */
+	aoi?: AoiTable;
+	/**
+	 * Where `src` starts in the enclosing text (L5X <Text>, L5K N: line). All reported lines and
+	 * columns, including those inside messages, are then relative to the enclosing text.
+	 */
+	origin?: { line: number; col: number };
+}
+
+export function parseNeutralText(src: string, options: NeutralParseOptions = {}): NeutralParseResult {
+	return new NeutralParser(src, options).parse();
 }
 
 class Fail extends Error {
@@ -49,7 +59,15 @@ class NeutralParser {
 	private pos = 0;
 	private readonly lineStarts: number[] = [0];
 
-	constructor(private readonly src: string) {
+	private readonly aoi: AoiTable | undefined;
+	private readonly origin: { line: number; col: number } | undefined;
+
+	constructor(
+		private readonly src: string,
+		options: NeutralParseOptions,
+	) {
+		this.aoi = options.aoi;
+		this.origin = options.origin;
 		for (let i = 0; i < src.length; i++) {
 			if (src.charCodeAt(i) === 10) this.lineStarts.push(i + 1);
 		}
@@ -204,10 +222,8 @@ class NeutralParser {
 			cur += c;
 		}
 
-		const def = logixDef(op);
-		const instr: Instr = { kind: "instr", op, shape: def.shape, operands, span: this.span(start, this.pos) };
-		if (def.variant) instr.variant = def.variant;
-		if (def.label) instr.label = def.label;
+		const instr: Instr = { kind: "instr", op, shape: "box", operands, span: this.span(start, this.pos) };
+		applyLogixDef(instr, this.aoi);
 		return instr;
 	}
 
@@ -250,7 +266,11 @@ class NeutralParser {
 			if ((this.lineStarts[mid] ?? 0) <= pos) lo = mid;
 			else hi = mid - 1;
 		}
-		return { line: lo + 1, col: pos - (this.lineStarts[lo] ?? 0) + 1 };
+		const line = lo + 1;
+		const col = pos - (this.lineStarts[lo] ?? 0) + 1;
+		const o = this.origin;
+		if (!o) return { line, col };
+		return line === 1 ? { line: o.line, col: o.col + col - 1 } : { line: o.line + line - 1, col };
 	}
 
 	private span(start: number, end: number): SourceSpan {

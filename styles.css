@@ -44,6 +44,25 @@
 	font-weight: 600;
 }
 
+.ldd-box-desc,
+.ldd-box-name,
+.ldd-pin {
+	fill: var(--text-muted);
+}
+
+.ldd-badge {
+	fill: var(--text-accent, var(--interactive-accent));
+	font-weight: 600;
+}
+
+.ldd-section-title {
+	font-family: var(--font-monospace);
+	font-size: var(--font-smaller, 0.875em);
+	font-weight: 600;
+	color: var(--text-muted);
+	margin: var(--size-4-2, 8px) 0 var(--size-4-1, 4px);
+}
+
 .ldd-svg .ldd-sym-text {
 	fill: var(--text-normal);
 	font-size: 10px;

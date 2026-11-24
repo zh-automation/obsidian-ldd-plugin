@@ -101,6 +101,13 @@ describe("layout: fixtures", () => {
 		expect(texts(g, "box-text")).toEqual(["Timer_01", "?", "?"]);
 	});
 
+	it("N9 draws an unknown box (AOI) with positional operands and no names", () => {
+		const g = lay(NEUTRAL.N09_aoi);
+		expect(texts(g, "box-title")).toEqual(["Valve_AOI"]);
+		expect(texts(g, "box-name")).toEqual([]);
+		expect(texts(g, "box-text")).toEqual(["Valve_01", "Open_Cmd", "Close_Cmd", "?", "?"]);
+	});
+
 	it("N11 lays out a very long rung wider than 2000 px", () => {
 		expect(lay(NEUTRAL.N11_long).width).toBeGreaterThan(2000);
 	});
@@ -123,7 +130,71 @@ describe("layout: fixtures", () => {
 	});
 });
 
+describe("layout: boxes", () => {
+	const boxes = (g: Geometry) => g.prims.filter((p): p is Extract<Prim, { t: "box" }> => p.t === "box");
+
+	it("draws the mnemonic, description, operand names, and values", () => {
+		const g = lay("XIC(Run)TON(Motor_Delay,5000,0);");
+		expect(texts(g, "box-title")).toEqual(["TON"]);
+		expect(texts(g, "box-desc")).toEqual(["Timer On Delay"]);
+		expect(texts(g, "box-name")).toEqual(["Timer", "Preset", "Accum"]);
+		expect(texts(g, "box-text")).toEqual(["Motor_Delay", "5000", "0"]);
+		// Values line up in one column after the longest name.
+		const xs = g.prims.filter((p) => p.t === "text" && p.cls === "box-text").map((p) => (p as { x: number }).x);
+		expect(new Set(xs).size).toBe(1);
+	});
+
+	it("draws status pins on the right and continues the rung from the first one", () => {
+		const g = lay("XIC(Run)TON(Motor_Delay,5000,0);");
+		expect(texts(g, "pin")).toEqual(["(EN)", "(DN)"]);
+		const box = boxes(g)[0]!;
+		const railR = rails(g)[1]!.x1;
+		const enWire = lines(g).filter((l) => l.cls === "wire" && l.y1 === l.y2 && l.x1 >= box.x + box.w);
+		const wireY = syms(g)[0]!.y;
+		// The EN row is the rung wire: wire segments on it reach the right rail.
+		expect(enWire.some((l) => l.y1 === wireY && l.x2 === railR)).toBe(true);
+		// The DN row is a short stub below it that does not reach the rail.
+		const dn = enWire.filter((l) => l.y1 > wireY);
+		expect(dn.length).toBeGreaterThan(0);
+		expect(dn.every((l) => l.x2 < railR)).toBe(true);
+	});
+
+	it("hides the JSR input count row", () => {
+		const g = lay("JSR(Sub_01,0);");
+		expect(texts(g, "box-name")).toEqual(["Routine Name"]);
+		expect(texts(g, "box-text")).toEqual(["Sub_01"]);
+	});
+
+	it("treats compare boxes as inputs for align: right", () => {
+		const src = "XIC(A)GRT(B,C)OTE(D);";
+		const wide = { minInnerW: 900 };
+		const inline = boxes(lay(src, wide))[0]!;
+		const right = boxes(lay(src, { ...wide, align: "right" }))[0]!;
+		expect(right.x).toBe(inline.x);
+		const coilInline = syms(lay(src, wide)).find((s) => s.t === "coil")!;
+		const coilRight = syms(lay(src, { ...wide, align: "right" })).find((s) => s.t === "coil")!;
+		expect(coilRight.x).toBeGreaterThan(coilInline.x);
+	});
+
+	it("draws no tag label for coils without operands (MCR)", () => {
+		const g = lay("XIC(A)MCR();");
+		expect(texts(g, "tag")).toEqual(["A"]);
+		expect(syms(g)[1]!.label).toBe("MCR");
+	});
+});
+
 describe("layout: options and text", () => {
+	it("marks non-N rung types in the left margin, left of the rung number", () => {
+		const rungs: Rung[] = parseNeutralText("XIC(A)OTE(B);\nXIC(C)OTE(D);").rungs.map((r, i) => ({ ...r, number: i }));
+		rungs[1]!.type = "I";
+		const g = layoutRungs(rungs);
+		const badge = g.prims.find((p) => p.t === "text" && p.cls === "badge") as Extract<Prim, { t: "text" }>;
+		expect(badge.text).toBe("I");
+		const num = g.prims.filter((p) => p.t === "text" && p.cls === "num")[1] as Extract<Prim, { t: "text" }>;
+		expect(badge.y).toBe(num.y);
+		expect(badge.x + S.charW).toBeLessThan(num.x - S.charW);
+	});
+
 	it("omits rung numbers with numbers: false", () => {
 		expect(texts(lay(NEUTRAL.N01_single, { numbers: false }), "num")).toEqual([]);
 	});

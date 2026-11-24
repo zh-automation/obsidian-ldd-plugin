@@ -3,8 +3,10 @@
  * Plain DOM APIs only, so this runs under a test DOM as well as inside Obsidian.
  */
 import { detectFormat, splitHeader, type BlockHeader, type Format } from "../detect";
-import type { Rung } from "../ir/types";
 import { layoutRungs, type LayoutStyle } from "../layout/layout";
+import type { FrontEndResult, Section } from "../parsers/common";
+import { parseL5K } from "../parsers/l5k";
+import { parseL5X } from "../parsers/l5x";
 import { parseNeutralText } from "../parsers/neutralText";
 import { renderGeometry } from "./svg";
 
@@ -24,10 +26,23 @@ const FORMAT_LABELS: Record<Format, string> = {
 };
 
 const PENDING: Partial<Record<Format, string>> = {
-	l5x: "M2",
-	l5k: "M2",
 	plcopen: "M3",
 };
+
+function parseBody(format: Format, body: string): FrontEndResult | undefined {
+	switch (format) {
+		case "neutral": {
+			const r = parseNeutralText(body);
+			return { sections: r.rungs.length > 0 ? [{ rungs: r.rungs }] : [], errors: r.errors, notices: [] };
+		}
+		case "l5x":
+			return parseL5X(body);
+		case "l5k":
+			return parseL5K(body);
+		default:
+			return undefined;
+	}
+}
 
 export function renderBlock(source: string, el: HTMLElement): void {
 	const doc = el.ownerDocument;
@@ -43,31 +58,45 @@ export function renderBlock(source: string, el: HTMLElement): void {
 	root.dataset.format = format;
 	const errors: BlockError[] = [...split.errors];
 
-	let rungs: Rung[] = [];
-	if (format === "neutral") {
-		const parsed = parseNeutralText(body);
-		rungs = parsed.rungs;
-		for (const e of parsed.errors) errors.push({ line: e.line + bodyLineOffset, col: e.col, message: e.message });
-	}
+	const parsed = parseBody(format, body);
+	for (const e of parsed?.errors ?? []) errors.push({ line: e.line + bodyLineOffset, col: e.col, message: e.message });
 
 	if (errors.length > 0) root.appendChild(renderErrors(doc, errors, source));
+	for (const n of parsed?.notices ?? []) root.appendChild(note(doc, n));
 
 	const pending = PENDING[format];
-	if (pending) {
-		root.appendChild(note(doc, `${FORMAT_LABELS[format]} detected. Rendering for this format arrives in ${pending}.`));
+	if (pending || !parsed) {
+		root.appendChild(note(doc, `${FORMAT_LABELS[format]} detected. Rendering for this format arrives in ${pending ?? "a later version"}.`));
 		return;
 	}
-	if (rungs.length === 0) {
-		if (errors.length === 0) root.appendChild(note(doc, "No rungs found."));
+	if (parsed.sections.length === 0) {
+		if (errors.length === 0 && parsed.notices.length === 0) root.appendChild(note(doc, "No rungs found."));
 		return;
 	}
 
+	const style = styleFor(header);
 	const start = header.start ?? 0;
+	for (const section of parsed.sections) renderSection(doc, root, section, start, style);
+}
+
+function renderSection(doc: Document, root: HTMLElement, section: Section, start: number, style: Partial<LayoutStyle>): void {
+	if (section.title) {
+		const h = doc.createElement("div");
+		h.className = "ldd-section-title";
+		h.textContent = section.title;
+		root.appendChild(h);
+	}
+	const { rungs } = section;
+	if (rungs.length === 0) {
+		root.appendChild(note(doc, "No rungs."));
+		return;
+	}
 	rungs.forEach((r, i) => {
 		if (r.number === undefined) r.number = start + i;
 	});
-	const geometry = layoutRungs(rungs, styleFor(header));
-	const label = `Ladder diagram, ${rungs.length} rung${rungs.length === 1 ? "" : "s"}`;
+	const geometry = layoutRungs(rungs, style);
+	const where = section.title ? `, ${section.title}` : "";
+	const label = `Ladder diagram${where}, ${rungs.length} rung${rungs.length === 1 ? "" : "s"}`;
 	root.appendChild(renderGeometry(doc, geometry, label));
 }
 

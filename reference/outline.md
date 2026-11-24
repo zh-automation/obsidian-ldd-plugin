@@ -1,6 +1,6 @@
 # Obsidian Ladder Logic Plugin: Outline
 
-Status: v0.5 (2026-11-24). Interview complete (section 0), samples validated (section 0.1), M0 and M1 code done (section 6), Q14 answered (outputs inline). Items tagged **[verify]** are claims to confirm against the source before implementation.
+Status: v0.6 (2026-11-24). Interview complete (section 0), samples validated (section 0.1), M0, M1, and M2 code done (section 6), Q14 answered (outputs inline). Items tagged **[verify]** are claims to confirm against the source before implementation.
 
 ---
 
@@ -24,6 +24,9 @@ Defaults chosen without asking (cheap to change):
 - Plugin id `ladder-logic-diagrams`, name "Ladder Logic Diagrams".
 - (M1) Contacts and coils use uniform 16-character cells; longer tag names wrap at member boundaries. Keeps symbols in stacked branch legs aligned, like the PLC editor.
 - (M1) Output alignment defaults to `inline` for Rockwell style: outputs sit right after the last input, then a wire runs to the right rail, as in Studio 5000 (Q14, answered 2026-11-24). Override per block with `align: right` to push trailing outputs against the right rail. The IEC-style default (M3) is still to be decided from the CODESYS samples.
+- (M2) XML is read with a small built-in reader (`src/parsers/xml.ts`) instead of `DOMParser`: pasted L5X is often a fragment (several `<Rung>` elements, no root), and errors need line/column positions. M3 reuses it for PLCopen.
+- (M2) AOI parameter names are pulled into M2 (Q13): when the pasted L5X or L5K includes the AOI definition, the AOI box labels its rows. Without the definition, AOI operands stay positional.
+- (M2) Full exports render every ladder routine as its own titled diagram ("Program / Routine", "AOI / Logic"); ST, FBD, and SFC routines are skipped with a one-line notice.
 
 ### 0.1 Sample validation (2026-11-24)
 
@@ -62,7 +65,7 @@ Findings that change the plan:
 2. **PLCopen parser must accept both `tc6_0200` and `tc6_0201`.** Match elements by local name, ignore the namespace version.
 3. **CODESYS samples cover only contacts and coils.** P3 (blocks), P4 (comments), edges, and set/reset have no real coverage yet. Need more exports before M3 (Q11).
 4. **CODESYS sample provenance is unclear (Q12).** The wrapper matches CODESYS, but the `<LD>` bodies are one-element-per-line while the rest of each file is indented, every timestamp is exactly 12:00:00, and two of three `ObjectId`s are version-5 (name-hashed) UUIDs. That pattern suggests generated files rather than a direct CODESYS export. If they were generated (for example, to import into CODESYS), they are fine as fixtures but do not tell us what CODESYS itself writes.
-5. **AOIs matter more than expected.** Consider pulling "AOI pin labels from L5X definitions" forward from section 9 into M2 when a full L5X (with `<AddOnInstructionDefinitions>`) is pasted.
+5. **AOIs matter more than expected.** Consider pulling "AOI pin labels from L5X definitions" forward from section 9 into M2 when a full L5X (with `<AddOnInstructionDefinitions>`) is pasted. (Done in M2. Check against samples: all 345 AOI calls whose definition is in the same file have exactly 1 + (number of `Required="true"` parameters) operands.)
 6. **Rung wrapping matters.** A 117-instruction rung is unreadable as a single scrolling line; M4 wrapping stays, but should not slip.
 7. **Rockwell samples are not sanitized.** They carry controller names that identify the customer and module IP addresses. They stay local (`reference/samples/` is gitignored); fixtures must be hand-derived with generic names.
 
@@ -241,7 +244,11 @@ Both are thin wrappers that pull rung numbers and comments, then hand the rung b
 
 L5X:
 
-- Accept one or more `<Rung>` elements, optionally wrapped in `<RLLContent>`, `<Routine>`, or a full L5X document. Parse with `DOMParser`.
+- Accept one or more `<Rung>` elements, optionally wrapped in `<RLLContent>`, `<Routine>`, or a full L5X document. Parsed with the built-in XML reader (section 0 defaults), which accepts fragments and reports errors by line and column.
+- Full documents: each `Type="RLL"` routine becomes a titled section; other routine types are counted in a notice. Empty ladder routines show "No rungs."
+- Rung exports: when any rung has `Use="Target"`, only those rungs are drawn and the context routines are ignored. **[verify]** against a real Studio 5000 rung export (samples are all controller exports).
+- `<Comment>` may hold `<LocalizedComment Lang="...">` in multi-language projects; the first one is used.
+- AOI operand names come from `<AddOnInstructionDefinition>/<Parameters>/<Parameter Required="true">` in definition order, after the instance tag (confirmed against samples).
 - `Number` attribute becomes the rung number; `<Comment>` CDATA becomes the rung comment; `<Text>` CDATA is neutral text. (Confirmed in samples: CDATA sits directly under `<Comment>` and `<Text>`.)
 - `Type` attribute (`N` normal; edit-state types such as pending/test edits) **[verify]** the full list against the Import/Export manual; v1 renders `N` and shows a badge for others. Samples contain `N` only.
 - Ignore any non-RLL routines in a full document (ST, FBD, SFC) with a notice.
@@ -250,7 +257,11 @@ L5K:
 
 - `RC: "comment";` attaches to the next `N:` rung. `N: <neutral text>;` is the rung, one line each in the samples.
 - Rung comments span multiple lines as concatenated quoted segments, ending at the line that closes with `;` (confirmed in samples). Escapes seen: `$N` (newline), `$'`, `$Q`. **[verify]** the full escape list (`$$`, `$L`, `$R`, `$T`, `$hh`) against the Import/Export manual.
-- Tolerate surrounding `ROUTINE ... END_ROUTINE` lines.
+- Tolerate surrounding `ROUTINE ... END_ROUTINE` lines. A whole L5K file works too: `ROUTINE` blocks become titled sections, `ST_ROUTINE`/`FBD_ROUTINE`/`SFC_ROUTINE` blocks are skipped with a notice, and everything else is ignored.
+- When the text has `ROUTINE` blocks, `RC:`/`N:` are only read inside them (multi-line tag descriptions can start a line with anything).
+- AOI operand names come from `ADD_ON_INSTRUCTION_DEFINITION ... PARAMETERS` (`Required := Yes`), same rule as L5X.
+- Confirmed in samples: the L5K and L5X exports of the same project give identical rungs, comments, and routine titles (246 rungs, 200 comments).
+- Inside a routine, a one- or two-letter prefix other than `N` is taken as a rung in an edit state and shown as a margin marker. **[verify]** the L5K prefixes for pending and test edits; samples have `N` only.
 
 ### 3.4 Logix instruction library
 
@@ -267,15 +278,27 @@ Data table: mnemonic, shape, box title, operand names, right-side status bits, i
 | System/comms | GSV, SSV, MSG |
 | Alarms (seen in samples) | ALMD, ALMA |
 
-v36+ mnemonic aliases (same entry, display the mnemonic as written): `EQ`=EQU, `NE`=NEQ, `LT`=LES, `LE`=LEQ, `GT`=GRT, `GE`=GEQ, `LIMIT`=LIM, `MOVE`=MOV. **[verify]** the complete v36 rename list from Rockwell's "Updated instruction mnemonics" page; the samples confirm the eight above exist in a v36.05 export.
+v36+ mnemonic aliases (same entry, display the mnemonic as written). Complete list from Rockwell's "Updated instruction mnemonics" page (checked 2026-11-24): `ACOS`=ACS, `ASIN`=ASN, `ATAN`=ATN, `TO_BCD`=TOD, `BCD_TO`=FRD, `EQ`=EQU, `GT`=GRT, `GE`=GEQ, `LE`=LEQ, `LT`=LES, `LIMIT`=LIM, `MOVE`=MOV, `NE`=NEQ, `SQRT`=SQR, `TRUNC`=TRN, `EXPT`=XPY.
 
-Everything else (AVE, SRT, PID, ...) falls through to the generic box. AOI pin labels from L5X definitions: candidate for M2, see 0.1 finding 5.
+M2 implementation (`src/instructions/logix.ts`):
 
-M1 symbol shapes (in `src/instructions/logix.ts`): contact-shaped `XIC`, `XIO`, `ONS`, `LBL`; coil-shaped `OTE`, `OTL` (L), `OTU` (U), `RES`, `JMP`, `MCR`; everything else a box listing operands positionally. **[verify]** ONS/LBL/RES/JMP/MCR shapes against Studio 5000 in M2.
+- Also in the table: AVE, SRT, PID (seen in samples), the trig/log math set (SIN, COS, TAN, LN, LOG), and the targets of every v36 alias. Anything else draws as a generic box.
+- Each entry has a role (input/output). Compare boxes are inputs, so `align: right` leaves them in place.
+- Status pins drawn on the right: TON/TOF/RTO `EN DN`, CTU `CU DN`, CTD `CD DN`, MSG/AVE/SRT `EN DN ER`. The rung continues from the first pin.
+- JSR: the second operand (input count, `0` in every sample) is not drawn; it splits the rest into Input Par and Return Par.
+- ALMD in ladder has 5 operands (ALMD, ProgAck, ProgReset, ProgDisable, ProgEnable): its `In` input is the rung condition. Confirmed by all 70 sample calls and Rockwell's ALMD page. ALMA has 5 (ALMA, In, ProgAckAll, ProgDisable, ProgEnable), confirmed by 15 sample calls.
+- Operand counts for every table entry that appears in the samples match the operand names.
+
+Still **[verify]** against Studio 5000 on screen (the user can screenshot a few rungs):
+
+- Box description wording (ours: "Timer On Delay", "Greater Than or Equal (A>=B)", ...).
+- Shapes: ONS and LBL as contacts; RES, JMP, MCR as coils; AFI, NOP, TND as boxes.
+- Status pins for ALMD/ALMA and visible BOOL outputs on AOIs (not drawn yet).
+- Whether Studio 5000 shows the JSR input count.
 
 ### 3.5 PLCopen XML front-end (CODESYS 3.5 first)
 
-- Parse with the built-in `DOMParser` (available on desktop and mobile; zero dependencies).
+- Parse with the M2 XML reader (`src/parsers/xml.ts`; positions for errors, fragments allowed, zero dependencies). Match elements with `localName`.
 - Accept TC6 XML v2.00 (`http://www.plcopen.org/xml/tc6_0200`, what the CODESYS samples use) and v2.01 (`tc6_0201`) by matching local element names. Path `project/types/pous/pou/body/LD` confirmed in samples. Also accept a bare `<LD>...</LD>` fragment pasted on its own.
 - LD elements to handle: `leftPowerRail`, `rightPowerRail`, `contact` (negated, edge), `coil` (negated, storage set/reset, edge), `block` (typeName, instanceName, inputVariables, outputVariables, inOutVariables), `inVariable`, `outVariable`, `inOutVariable`, `comment`, `connector`/`continuation`, `jump`, `label`, `return`.
 - Wiring: every element has `localId`; edges come from `connectionPointIn/connection@refLocalId` (plus `formalParameter` for block pins).
@@ -353,9 +376,11 @@ tool-obsidian-ldd-plugin/
     detect.ts                format detection, header parsing
     ir/types.ts
     parsers/
+      common.ts              sections, front-end result, line index
+      xml.ts                 tolerant XML reader with source positions (L5X, PLCopen)
       neutralText.ts
-      l5x.ts                 <Rung> extraction -> neutralText
-      l5k.ts                 RC:/N: extraction -> neutralText
+      l5x.ts                 <Rung> extraction -> neutralText, AOI definitions
+      l5k.ts                 RC:/N: extraction -> neutralText, AOI definitions
       plcopenXml.ts          spec-based TC6 parsing
       codesys.ts             CODESYS 3.5 quirks (networks, addData)
       plcopenGraph.ts        graph -> series/parallel reduction
@@ -398,7 +423,7 @@ tool-obsidian-ldd-plugin/
 |---|---|---|
 | M0 | Scaffold: template, build, test runner, `.gitignore` for samples, code block registered, renders a placeholder SVG | **Code done 2026-11-24**: 16 tests pass, build passes, bundle smoke-tested against a stubbed `Plugin`. Still needs a real load in Obsidian. |
 | M1 | Neutral text core: contacts, coils, series, nested branches, empty legs, error panel | **Code done 2026-11-24**: all N1 to N12 fixtures pass (66 tests); all 1,050 real sample rungs parse and lay out; 377-rung routine parses in ~4 ms and lays out in ~5 ms; checked visually in light and dark. Still needs a look in Obsidian Live Preview. |
-| M2 | Boxes + Logix instruction library, rung comments, rung numbers, multi-rung blocks, header options, L5X and L5K adapters | Fixtures N6 to N9, X1 to X4, K1 to K3 pass on real samples |
+| M2 | Boxes + Logix instruction library, rung comments, rung numbers, multi-rung blocks, header options, L5X and L5K adapters | **Code done 2026-11-24**: fixtures N6 to N9, X1 to X7, K1 to K6 pass (111 tests). All 4 sample files (1,050 rungs) go through the real L5X/L5K front-ends with zero errors; 1,767 of 1,778 boxes get operand names (the rest are AOIs whose definition is not in the file). Paired L5K/L5X exports agree rung for rung. A 3 MB L5X parses in ~70 ms. Checked visually in light and dark. Still needs a look in Obsidian and the Studio 5000 [verify] items in 3.4. |
 | M3 | PLCopen XML for CODESYS 3.5: graph build, rung split, SP reduction, IEC symbols, block pins, position-based fallback | Fixtures P1 to P6 pass on real CODESYS exports |
 | M4 | Polish: settings tab, style toggle, copy SVG/PNG, hover tooltips, rung wrapping, mobile check | Used on real notes for a week without issues |
 | M5 | Internal release: README with examples, release workflow, BRAT install instructions for the team | A teammate installs it without help |
@@ -434,12 +459,18 @@ L5X:
 - X2. Full `<RLLContent>` block with many rungs
 - X3. Full L5X document with mixed routine types (RLL rendered, others skipped with notice)
 - X4. Rung with non-`N` type (edit state badge)
+- X5. Rung export: only `Use="Target"` rungs drawn
+- X6. Malformed XML: error position, complete rungs still drawn
+- X7. Neutral-text error inside CDATA mapped to block line/column
 
 L5K:
 
 - K1. `N:` lines only
 - K2. `RC:` multi-line comment with escape sequences
 - K3. Wrapped in `ROUTINE ... END_ROUTINE`
+- K4. Rung text over several lines, with an error mapped to block line/column
+- K5. Non-`N` prefix inside a routine (edit state badge)
+- K6. AOI `PARAMETERS` naming an AOI call; a description line starting `N:` outside a routine is ignored
 
 PLCopen XML (CODESYS 3.5):
 
@@ -470,7 +501,7 @@ PLCopen XML (CODESYS 3.5):
 - Convert neutral text to/from IEC ST or PLCopen XML
 - Other PLCopen vendors (TwinCAT, Schneider, B&R, PLCnext)
 - Siemens SimaticML / IEC 61131-10 XML front-ends
-- AOI definition import from L5X for labeled pins
+- AOI definitions from a separate note or vault file, so AOI boxes get labels without pasting the definition into every block
 - Click a tag to search the vault; cross-reference every rung in the vault that touches a tag
 - Scale-to-fit option for wide rungs
 
@@ -492,7 +523,7 @@ PLCopen XML (CODESYS 3.5):
 | Q10 | CODESYS LD export structure (plain `<LD>`, `<FBD>`, or `addData` networks)? | Samples: plain `<LD>`, `tc6_0200`, rail pair per rung. Pending Q12 |
 | Q11 | Can you export CODESYS LD POUs that use blocks (TON, CTU, R_TRIG), set/reset coils, edge contacts, and network comments? | Open; needed before M3 |
 | Q12 | Were the three CODESYS files exported by CODESYS, or generated (e.g. for import into CODESYS)? | Open |
-| Q13 | Pull AOI pin labels (from pasted L5X definitions) into M2? | Open |
+| Q13 | Pull AOI pin labels (from pasted L5X definitions) into M2? | Done in M2 (cheap, and only used when the definition is in the block); say if it should come out |
 | Q14 | Does Studio 5000 draw trailing outputs against the right rail or right after the last input? | Right after the last input; `inline` is now the default (2026-11-24) |
 
 ---

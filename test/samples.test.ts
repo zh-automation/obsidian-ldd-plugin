@@ -1,16 +1,18 @@
 /// <reference types="node" />
 /**
  * Regression run over the real exports in reference/samples/ (gitignored, local only).
- * Skipped when the folder is absent. Failure messages name the file and rung index only,
- * never rung text, so customer tag names stay out of test output.
+ * Skipped when the folder is absent. Failure messages give counts, positions, and error messages
+ * only, never rung text or names, so customer identifiers stay out of test output.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { Rung } from "../src/ir/types";
+import type { Instr, Node, Rung } from "../src/ir/types";
 import { layoutRungs } from "../src/layout/layout";
-import { parseNeutralText } from "../src/parsers/neutralText";
+import type { FrontEndResult } from "../src/parsers/common";
+import { parseL5K } from "../src/parsers/l5k";
+import { parseL5X } from "../src/parsers/l5x";
 
 const SAMPLES = fileURLToPath(new URL("../reference/samples", import.meta.url));
 
@@ -21,51 +23,78 @@ function walk(dir: string): string[] {
 	});
 }
 
-/** Rung texts from L5X (<Text> CDATA) and L5K (N: lines). */
-function rungTexts(file: string): string[] {
-	const text = readFileSync(file, "utf8");
-	const ext = path.extname(file).toLowerCase();
-	if (ext === ".l5x") {
-		return [...text.matchAll(/<Text>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/Text>/g)].map((m) => m[1] ?? "");
-	}
-	if (ext === ".l5k") {
-		return [...text.matchAll(/^\s*N:\s*(.*)$/gm)].map((m) => m[1] ?? "");
-	}
-	return [];
+/** Count of <Rung> elements / N: lines by plain text search, as an independent cross-check. */
+function rawRungCount(text: string, ext: string): number {
+	return ext === ".l5x" ? (text.match(/<Rung\s/g)?.length ?? 0) : (text.match(/^\s*N:/gm)?.length ?? 0);
+}
+
+function instrs(n: Node): Instr[] {
+	if (n.kind === "instr") return [n];
+	if (n.kind === "series") return n.items.flatMap(instrs);
+	return n.legs.flatMap(instrs);
 }
 
 const files = existsSync(SAMPLES) ? walk(SAMPLES).filter((f) => /\.(l5x|l5k)$/i.test(f)) : [];
+const results = new Map<string, FrontEndResult>();
 
 describe.skipIf(files.length === 0)("real Rockwell samples", () => {
 	for (const file of files) {
 		const name = path.basename(file);
+		const ext = path.extname(file).toLowerCase();
 
-		it(`${name}: every rung parses and lays out`, () => {
-			const texts = rungTexts(file);
-			expect(texts.length).toBeGreaterThan(0);
-
-			const failures: string[] = [];
-			const rungs: Rung[] = [];
+		it(`${name}: every rung parses through the ${ext === ".l5x" ? "L5X" : "L5K"} front-end and lays out`, () => {
+			const text = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
 			const t0 = performance.now();
-			texts.forEach((t, i) => {
-				const r = parseNeutralText(t);
-				if (r.errors.length > 0 || r.rungs.length !== 1) {
-					failures.push(`rung index ${i}: ${r.errors[0]?.message ?? `${r.rungs.length} rungs`}`);
-					return;
-				}
-				rungs.push({ ...r.rungs[0]!, number: i });
-			});
+			const r = ext === ".l5x" ? parseL5X(text) : parseL5K(text);
 			const t1 = performance.now();
-			const g = layoutRungs(rungs);
+			results.set(file, r);
+
+			expect(r.errors.map((e) => `line ${e.line}, col ${e.col}: ${e.message}`)).toEqual([]);
+			const rungs = r.sections.flatMap((s) => s.rungs);
+			expect(rungs.length).toBe(rawRungCount(text, ext));
+
+			let prims = 0;
+			for (const s of r.sections) {
+				const g = layoutRungs(s.rungs.map((g2, i) => ({ ...g2, number: g2.number ?? i })));
+				const bad = g.prims.filter((p) => Object.values(p).some((v) => typeof v === "number" && !Number.isFinite(v)));
+				expect(bad).toHaveLength(0);
+				prims += g.prims.length;
+			}
 			const t2 = performance.now();
 
-			expect(failures).toEqual([]);
-			const bad = g.prims.filter((p) => Object.values(p).some((v) => typeof v === "number" && !Number.isFinite(v)));
-			expect(bad).toHaveLength(0);
+			const all = rungs.flatMap((g) => instrs(g.body));
+			const boxes = all.filter((i) => i.shape === "box");
+			const named = boxes.filter((i) => i.operands.some((o) => o.name));
 			console.info(
-				`${name}: ${texts.length} rungs, parse ${(t1 - t0).toFixed(1)} ms, layout ${(t2 - t1).toFixed(1)} ms, ` +
-					`${g.prims.length} prims, ${g.width}x${g.height}px`,
+				`${name}: ${r.sections.length} sections, ${rungs.length} rungs, ${rungs.filter((g) => g.comment).length} comments, ` +
+					`${boxes.length} boxes (${named.length} with operand names), parse ${(t1 - t0).toFixed(1)} ms, ` +
+					`layout ${(t2 - t1).toFixed(1)} ms, ${prims} prims; ${r.notices.join(" ")}`,
 			);
 		});
 	}
+
+	it("L5K and L5X exports of the same project agree on rung text and comments", () => {
+		const l5k = [...results.entries()].filter(([f]) => /\.l5k$/i.test(f));
+		let pairs = 0;
+		for (const [kFile, k] of l5k) {
+			const kRungs = k.sections.flatMap((s) => s.rungs);
+			const match = [...results.entries()].find(
+				([f, x]) => /\.l5x$/i.test(f) && x.sections.flatMap((s) => s.rungs).length === kRungs.length && x.sections.length === k.sections.length,
+			);
+			if (!match) continue;
+			pairs++;
+			const xRungs = match[1].sections.flatMap((s) => s.rungs);
+			const norm = (c?: string) => (c ?? "").replace(/\s+$/gm, "").trim();
+			const commentDiffs = kRungs.flatMap((g, i) => (norm(g.comment) === norm(xRungs[i]?.comment) ? [] : [i]));
+			const bodyDiffs = kRungs.flatMap((g, i) => (JSON.stringify(strip(g)) === JSON.stringify(strip(xRungs[i])) ? [] : [i]));
+			expect({ file: path.basename(kFile), commentDiffs, bodyDiffs }).toEqual({ file: path.basename(kFile), commentDiffs: [], bodyDiffs: [] });
+			expect(k.sections.map((s) => s.title)).toEqual(match[1].sections.map((s) => s.title));
+		}
+		console.info(`L5K/L5X pairs compared: ${pairs}`);
+	});
 });
+
+/** Rung body without source spans (offsets differ between formats). */
+function strip(r: Rung | undefined): unknown {
+	return JSON.parse(JSON.stringify(r?.body ?? null, (k, v: unknown) => (k === "span" ? undefined : v)));
+}
