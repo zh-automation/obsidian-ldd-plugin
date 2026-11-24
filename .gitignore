@@ -1,0 +1,28 @@
+# Dependencies and build output
+node_modules/
+main.js
+*.js.map
+coverage/
+
+# Obsidian per-install plugin settings
+data.json
+
+# Raw sample exports contain customer identifiers and IPs. Never commit.
+# Sanitized fixtures derived from them live in test/fixtures/.
+reference/samples/
+
+# Dev vault: keep notes and the enabled-plugins list, ignore everything else Obsidian writes
+test-vault/.obsidian/*
+!test-vault/.obsidian/community-plugins.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local render preview (may contain sample data)
+.preview/
+
+# Claude Code local config
+.claude/

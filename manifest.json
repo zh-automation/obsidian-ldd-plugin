@@ -1,0 +1,9 @@
+{
+  "id": "ladder-logic-diagrams",
+  "name": "Ladder Logic Diagrams",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Render ladder logic rungs from Studio 5000 neutral text, L5X, L5K, and PLCopen XML as inline diagrams.",
+  "author": "Texas Automation Systems",
+  "isDesktopOnly": false
+}

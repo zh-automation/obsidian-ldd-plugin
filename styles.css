@@ -1,0 +1,103 @@
+/* Ladder Logic Diagrams. All colors come from Obsidian theme variables so light/dark both work. */
+
+.ldd-block {
+	overflow-x: auto;
+	padding: var(--size-4-2, 8px) 0;
+}
+
+.ldd-block .ldd-svg {
+	display: block;
+	max-width: none;
+}
+
+/* Layout assumes 12px monospace text; keep these in sync with DEFAULT_STYLE in src/layout/layout.ts. */
+.ldd-svg text {
+	font-family: var(--font-monospace, ui-monospace, Consolas, monospace);
+	font-size: 12px;
+}
+
+.ldd-rail {
+	stroke: var(--text-normal);
+	stroke-width: 3;
+}
+
+.ldd-wire,
+.ldd-sym {
+	stroke: var(--text-normal);
+	stroke-width: 1.5;
+	fill: none;
+}
+
+.ldd-box {
+	stroke: var(--text-normal);
+	stroke-width: 1.5;
+	fill: var(--background-primary);
+}
+
+.ldd-tag,
+.ldd-box-text {
+	fill: var(--text-normal);
+}
+
+.ldd-box-title {
+	fill: var(--text-normal);
+	font-weight: 600;
+}
+
+.ldd-svg .ldd-sym-text {
+	fill: var(--text-normal);
+	font-size: 10px;
+	font-weight: 600;
+}
+
+.ldd-num {
+	fill: var(--text-muted);
+}
+
+.ldd-comment {
+	fill: var(--text-muted);
+	font-style: italic;
+}
+
+.ldd-instr:hover .ldd-sym,
+.ldd-instr:hover .ldd-box {
+	stroke: var(--interactive-accent);
+}
+
+.ldd-err-wire {
+	stroke: var(--text-error);
+	stroke-width: 1.5;
+	stroke-dasharray: 4 3;
+}
+
+.ldd-err-text {
+	fill: var(--text-error);
+}
+
+.ldd-note {
+	color: var(--text-muted);
+	font-size: var(--font-smaller, 0.875em);
+	font-style: italic;
+}
+
+.ldd-error {
+	border-left: 3px solid var(--text-error);
+	padding: var(--size-4-1, 4px) var(--size-4-2, 8px);
+	margin-bottom: var(--size-4-2, 8px);
+	color: var(--text-error);
+	font-family: var(--font-monospace);
+	font-size: var(--font-smaller, 0.875em);
+}
+
+.ldd-error-item + .ldd-error-item {
+	margin-top: var(--size-4-1, 4px);
+}
+
+.ldd-error-src {
+	margin: 2px 0 0;
+	padding: 0;
+	background: none;
+	color: var(--text-normal);
+	white-space: pre;
+	overflow-x: auto;
+}

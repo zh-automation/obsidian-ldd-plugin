@@ -1,0 +1,26 @@
+{
+  "name": "ladder-logic-diagrams",
+  "version": "0.1.0",
+  "description": "Obsidian plugin: render ladder logic rungs from Studio 5000 neutral text, L5X, L5K, and PLCopen XML.",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "preview": "esbuild scripts/preview.ts --bundle --platform=node --format=esm --packages=external --outfile=.preview/preview.mjs --log-level=warning && node .preview/preview.mjs"
+  },
+  "author": "Texas Automation Systems",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "happy-dom": "21.0.4",
+    "obsidian": "1.14.4",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
