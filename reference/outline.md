@@ -430,7 +430,7 @@ tool-obsidian-ldd-plugin/
 - Git repo initialized on `main` (M0).
 - `npm run preview` renders fixtures to `.preview/index.html`; `npm run preview -- --samples` adds the most complex real rungs (local only, `.preview/` is gitignored). `.claude/launch.json` serves it on port 8731 for the Claude browser pane.
 - `test/samples.test.ts` runs the real parser and layout over every rung in `reference/samples/` and skips when the folder is absent.
-- Internal distribution: private GitHub repo + GitHub releases, installed with BRAT.
+- Internal distribution: the internal Forgejo repo is the source of truth; a Forgejo push mirror copies commits and tags to GitHub (public: `zh-automation/obsidian-ldd-plugin`); `.github/workflows/release.yml` turns each version tag into a GitHub release with `main.js`, `manifest.json`, `styles.css`; testers install with BRAT, which installs only from GitHub releases (it reads `manifest.json` from the release assets; tag, release name, and manifest version must match). `npm version <x.y.z>` keeps them in step (`scripts/version-bump.mjs`, `.npmrc`). Steps in README, "Releasing". The GitHub repo is public, so testers need no token. Anything committed is public once the mirror syncs: samples stay gitignored, and fixtures stay generic.
 
 ---
 
@@ -443,7 +443,7 @@ tool-obsidian-ldd-plugin/
 | M2 | Boxes + Logix instruction library, rung comments, rung numbers, multi-rung blocks, header options, L5X and L5K adapters | **Code done 2026-11-24**: fixtures N6 to N9, X1 to X7, K1 to K6 pass (111 tests). All 4 sample files (1,050 rungs) go through the real L5X/L5K front-ends with zero errors; 1,767 of 1,778 boxes get operand names (the rest are AOIs whose definition is not in the file). Paired L5K/L5X exports agree rung for rung. A 3 MB L5X parses in ~70 ms. Checked visually in light and dark. Still needs a look in Obsidian and the Studio 5000 [verify] items in 3.4. |
 | M3 | PLCopen XML for CODESYS 3.5: graph build, rung split, SP reduction, IEC symbols, block pins, position-based fallback | **Code done 2026-11-24**: fixtures P1 to P8 pass (137 tests). All 4 CODESYS files (5 POUs, 74 networks, 6 blocks) reduce with zero errors; network counts match the networktitle markers / right rails. Checked visually against the real export. Position fallback dropped (3.5). Still needs a look in Obsidian and the 3.5 [verify] items. |
 | M4 | Polish: settings tab, style toggle, copy SVG/PNG, hover tooltips, rung wrapping, mobile check | **Code done 2026-11-25**: 158 tests, including the plugin wiring against an Obsidian stand-in (registration, render children, copy menu, settings re-render, cleanup). Wrapping checked visually on fixtures and the largest real rungs. Mobile: static check only (no Node or Electron APIs; PNG copy degrades to a notice). Done when: used on real notes for a week, including once on a phone. |
-| M5 | Internal release: README with examples, release workflow, BRAT install instructions for the team | A teammate installs it without help |
+| M5 | Internal release: README with examples, release workflow, BRAT install instructions for the team | A teammate installs it without help. Release workflow and version bump added 2026-11-25 (not yet run on GitHub; needs the mirror). |
 
 Before M3 starts: CODESYS exports covering blocks (TON etc.), set/reset coils, edge contacts, and network comments, made with CODESYS's own PLCopenXML export (Q11, Q12).
 

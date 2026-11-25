@@ -38,6 +38,30 @@ npm run dev
 - Tests run the plugin itself against a small stand-in for the Obsidian API (`test/stubs/obsidian.ts`, aliased in `vitest.config.ts`), since the `obsidian` package ships types only.
 - `npm run preview` renders the test fixtures (neutral text, L5X, L5K, PLCopen, and an instruction-library sampler) to `.preview/index.html` for review in any browser. Add `-- --samples` to include the most complex Rockwell rungs and every PLCopen file from `reference/samples/` (stays local; `.preview/` is gitignored).
 
+## Releasing
+
+The Forgejo repo is the source of truth. A Forgejo push mirror copies commits and tags to GitHub, where `.github/workflows/release.yml` turns each version tag into a GitHub release with `main.js`, `manifest.json`, and `styles.css` attached. Testers install and update from those releases with the BRAT plugin.
+
+One-time setup:
+
+1. Create an empty repo on GitHub. Treat it as read-only: the mirror force-pushes over it.
+2. Create a GitHub fine-grained token for that repo only, with **Contents** and **Workflows** read and write.
+3. In Forgejo: Settings, Repository, Mirror Settings. Add `https://github.com/<owner>/<repo>.git` with your GitHub username and the token as the password, tick "Sync when new commits are pushed", and leave the branch filter blank (a full mirror, so tags go too).
+
+Each release:
+
+```powershell
+npm version 0.2.0
+```
+
+```powershell
+git push origin main --follow-tags
+```
+
+`npm version` updates `package.json`, `manifest.json`, and `versions.json`, commits, and tags `0.2.0` (no `v` prefix; see `.npmrc`). The workflow refuses a tag that does not match `manifest.json`. A tag with a suffix, such as `0.2.0-beta.1`, is published as a pre-release.
+
+Testers: install BRAT from Community plugins, run "BRAT: Add a beta plugin for testing", and enter `zh-automation/obsidian-ldd-plugin`. BRAT installs the latest release and checks for updates. (The GitHub repo is public, so no token is needed.)
+
 ## Sample data
 
 Raw exports go in `reference/samples/` (gitignored; they contain customer identifiers). Test fixtures in `test/fixtures/` must be sanitized copies with generic tag names. `npm test` also runs every sample file through the real L5X/L5K/PLCopen front-ends (`test/samples.test.ts`, skipped when the folder is absent) and prints counts only.
