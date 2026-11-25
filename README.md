@@ -13,6 +13,22 @@ Renders ladder logic rungs inline in Obsidian notes from:
 ```
 ````
 
+## Install
+
+The plugin is not in Obsidian's community plugin list. Install it from its [GitHub releases](https://github.com/zh-automation/obsidian-ldd-plugin/releases) with BRAT, which also keeps it updated.
+
+1. In Obsidian, open **Settings → Community plugins**. Turn off Restricted mode if it is on, then choose **Browse**, search for **BRAT**, install it, and enable it.
+2. Open the command palette (Ctrl+P, or Cmd+P on macOS) and run **BRAT: Add a beta plugin for testing**.
+3. Enter `zh-automation/obsidian-ldd-plugin`, keep the latest version, and add the plugin.
+4. If it is not switched on afterwards, enable **Ladder Logic Diagrams** under **Settings → Community plugins**.
+5. Check it: put the `ladder` block above in a note. Reading view and Live Preview should both show a diagram.
+
+BRAT checks for new releases when Obsidian starts (an option in BRAT's settings) or when you run its update command.
+
+Without BRAT: download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/zh-automation/obsidian-ldd-plugin/releases/latest), put them in `<your vault>/.obsidian/plugins/ladder-logic-diagrams/`, then reload Obsidian and enable the plugin. Repeat for each update.
+
+## What it renders
+
 **Status: M4.** Neutral text, L5X, and L5K render: contacts, coils, nested branches, empty legs, instruction boxes with operand names and status pins (TON, CTU, MOV, GSV, ALMD, ...; v36 mnemonics such as `EQ` and `MOVE` included), rung comments, rung numbers, and an error panel with line/column carets. Paste a few `<Rung>` elements, an `<RLLContent>`, or a whole L5X/L5K export; each ladder routine draws as its own titled diagram. AOI boxes get parameter names when the AOI definition is in the same block.
 
 **M3:** PLCopen XML (CODESYS 3.5) renders in IEC style: `| |` contacts, edge and negated contacts, set/reset coils, function blocks with pins and values (TON, R_TRIG, CTU, EN/ENO boxes), network titles and comments, one diagram per POU or action. Paste a bare `<LD>`, a `<pou>`, or a whole export. Networks are numbered from 1 and coils sit at the right rail, like CODESYS; `style: rockwell`, `align: inline`, and `start` in the header change that. Networks that are not series-parallel show as an error rung.
@@ -60,7 +76,7 @@ git push origin main --follow-tags
 
 `npm version` updates `package.json`, `manifest.json`, and `versions.json`, commits, and tags `0.2.0` (no `v` prefix; see `.npmrc`). The workflow refuses a tag that does not match `manifest.json`. A tag with a suffix, such as `0.2.0-beta.1`, is published as a pre-release.
 
-Testers: install BRAT from Community plugins, run "BRAT: Add a beta plugin for testing", and enter `zh-automation/obsidian-ldd-plugin`. BRAT installs the latest release and checks for updates. (The GitHub repo is public, so no token is needed.)
+Testers install and update through BRAT as described under [Install](#install). The GitHub repo is public, so they need no token.
 
 ## Sample data
 
