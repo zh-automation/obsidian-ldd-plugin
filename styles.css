@@ -51,6 +51,11 @@
 	fill: var(--text-muted);
 }
 
+.ldd-wrap {
+	fill: var(--text-muted);
+	font-weight: 600;
+}
+
 .ldd-badge {
 	fill: var(--text-accent, var(--interactive-accent));
 	font-weight: 600;

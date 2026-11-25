@@ -1,6 +1,6 @@
 # Obsidian Ladder Logic Plugin: Outline
 
-Status: v0.7 (2026-11-24). Interview complete (section 0), samples validated (section 0.1), M0 to M3 code done (section 6), Q14 answered (outputs inline). Items tagged **[verify]** are claims to confirm against the source before implementation.
+Status: v0.8 (2026-11-25). Interview complete (section 0), samples validated (section 0.1), M0 to M4 code done (section 6), Q14 answered (outputs inline). Items tagged **[verify]** are claims to confirm against the source before implementation.
 
 ---
 
@@ -154,17 +154,21 @@ IEC style (PLCopen): `| |`, `|/|`, `|P|`, `|N|`, `( )`, `(/)`, `(S)`, `(R)`, fun
 
 - Works in Reading view, Live Preview, and PDF export (SVG in the DOM).
 - Theme-aware: colors from Obsidian CSS variables (`--text-normal`, `--background-primary`, `--interactive-accent`); stable CSS class names so users can restyle with snippets.
-- Wide rungs: horizontal scroll inside the block (D6). Wrapping in M4.
+- Wide rungs (M4): wrap to the note's width by default, breaking between top-level elements with `>>` at both ends of each break. Re-lays out when the pane is resized. A rung that is one huge branch cannot break and still scrolls sideways (wrapping inside branches is a later idea, section 9). `wrap: off` in the header, or the setting, turns wrapping off.
 - Parse errors: inline error panel with line, column, and a caret under the offending character. Rungs that parsed cleanly still render.
-- Context menu on the diagram: copy SVG, copy source, (M4) save PNG.
-- Hover: tooltip with full operand text when a tag name is truncated.
+- Context menu on the diagram (M4): Copy diagram as SVG (theme colors inlined, background included), Copy diagram as PNG (2x, lower for very tall routines; needs image clipboard support, so it shows a notice instead on devices without it), Copy ladder source.
+- Hover: tooltip with the instruction as written.
 
-### 2.4 Settings tab
+### 2.4 Settings tab (M4)
 
-- Style: match source (default) / always Rockwell / always IEC
-- Rung numbers on/off, default start number
-- Output alignment: inline (default, like Studio 5000) or right-justified to rail
-- Cell width in characters (default 16), font size
+- Symbol style: match source (default) / Rockwell / IEC
+- Output position: match style (default) / after the last input / against the right rail
+- Rung numbers on/off
+- Wrap long rungs on/off (default on)
+- Cell width in characters (10 to 32, default 16)
+- Diagram size in percent (50 to 200, default 100), instead of a font size setting
+- Precedence: block header, then settings, then the format's default. Changing a setting re-renders open blocks.
+- Not added: a default start number setting (the header's `start:` covers it; Logix starts at 0 and PLCopen at 1).
 
 ---
 
@@ -342,7 +346,7 @@ Pure function: `layout(rungs: Rung[], style: StyleConfig) => Geometry`. No DOM a
 - Labels: tag name above contact/coil.
 - Output alignment: `inline` (default) places outputs right after the last input and wires the remainder to the right rail; `right` right-justifies trailing outputs against the rail.
 - Text measurement: monospace font with fixed char width (no DOM measuring).
-- Rung wrapping (M4): break the top-level series at element boundaries when width exceeds max, draw continuation markers like Studio 5000.
+- Rung wrapping (M4, `wrapWidth`): rungs wider than the space pack their top-level elements greedily into rows; branches move as a whole. The width between the rails is capped at the space available but never narrower than the widest single element. Rung number on the first row; left rail feeds the first row, the last row feeds the right rail; `align: right` applies to the last row. **[verify]** against how Studio 5000 marks a wrapped rung (ours: `>>` text).
 
 ### 3.7 Renderer
 
@@ -354,7 +358,8 @@ Pure function: `layout(rungs: Rung[], style: StyleConfig) => Geometry`. No DOM a
 
 - `this.registerMarkdownCodeBlockProcessor('ladder', handler)` plus `ldd` alias.
 - `manifest.json`: `isDesktopOnly: false`.
-- Performance target: parse + layout + render under 10 ms for a 50-rung block (Live Preview re-renders on edit). Cache by source hash.
+- Performance target: parse + layout + render under 10 ms for a 50-rung block (Live Preview re-renders on edit). Cache by source hash. (M4: parsed results are cached by format and body, last 16 blocks; resizing or changing settings only lays out again.)
+- Each block is a `MarkdownRenderChild` added to the post-processor context: it watches its own width with a `ResizeObserver`, owns the context menu, and unregisters itself when Obsidian unloads it.
 
 ### 3.9 Community-plugin readiness (D7)
 
@@ -382,7 +387,9 @@ tool-obsidian-ldd-plugin/
     Ladder samples.md        synthetic examples of every input format
   src/
     main.ts                  plugin entry, code block registration
-    settings.ts              settings tab
+    blockChild.ts            one rendered block: resize relayout, copy menu, cleanup
+    settings.ts              settings model, header/settings/format precedence (pure)
+    settingsTab.ts           settings tab UI
     detect.ts                format detection, header parsing
     ir/types.ts
     parsers/
@@ -396,9 +403,10 @@ tool-obsidian-ldd-plugin/
     instructions/
       logix.ts               Rockwell instruction table
       iec.ts                 IEC standard FBs (TON, TOF, TP, CTU, CTD, R_TRIG, F_TRIG, SR, RS)
-    layout/layout.ts
-    render/svg.ts
-    render/symbols.ts
+    layout/layout.ts         measure/place, IEC block layout, rung wrapping
+    render/block.ts          header, parse (cached), sections, error panel, relayout
+    render/svg.ts            geometry -> SVG, Rockwell and IEC symbols
+    render/export.ts         standalone SVG (inlined theme styles) and PNG
   test/
     fixtures/                sanitized copies derived from samples/
     neutralText.test.ts
@@ -434,7 +442,7 @@ tool-obsidian-ldd-plugin/
 | M1 | Neutral text core: contacts, coils, series, nested branches, empty legs, error panel | **Code done 2026-11-24**: all N1 to N12 fixtures pass (66 tests); all 1,050 real sample rungs parse and lay out; 377-rung routine parses in ~4 ms and lays out in ~5 ms; checked visually in light and dark. Still needs a look in Obsidian Live Preview. |
 | M2 | Boxes + Logix instruction library, rung comments, rung numbers, multi-rung blocks, header options, L5X and L5K adapters | **Code done 2026-11-24**: fixtures N6 to N9, X1 to X7, K1 to K6 pass (111 tests). All 4 sample files (1,050 rungs) go through the real L5X/L5K front-ends with zero errors; 1,767 of 1,778 boxes get operand names (the rest are AOIs whose definition is not in the file). Paired L5K/L5X exports agree rung for rung. A 3 MB L5X parses in ~70 ms. Checked visually in light and dark. Still needs a look in Obsidian and the Studio 5000 [verify] items in 3.4. |
 | M3 | PLCopen XML for CODESYS 3.5: graph build, rung split, SP reduction, IEC symbols, block pins, position-based fallback | **Code done 2026-11-24**: fixtures P1 to P8 pass (137 tests). All 4 CODESYS files (5 POUs, 74 networks, 6 blocks) reduce with zero errors; network counts match the networktitle markers / right rails. Checked visually against the real export. Position fallback dropped (3.5). Still needs a look in Obsidian and the 3.5 [verify] items. |
-| M4 | Polish: settings tab, style toggle, copy SVG/PNG, hover tooltips, rung wrapping, mobile check | Used on real notes for a week without issues |
+| M4 | Polish: settings tab, style toggle, copy SVG/PNG, hover tooltips, rung wrapping, mobile check | **Code done 2026-11-25**: 158 tests, including the plugin wiring against an Obsidian stand-in (registration, render children, copy menu, settings re-render, cleanup). Wrapping checked visually on fixtures and the largest real rungs. Mobile: static check only (no Node or Electron APIs; PNG copy degrades to a notice). Done when: used on real notes for a week, including once on a phone. |
 | M5 | Internal release: README with examples, release workflow, BRAT install instructions for the team | A teammate installs it without help |
 
 Before M3 starts: CODESYS exports covering blocks (TON etc.), set/reset coils, edge contacts, and network comments, made with CODESYS's own PLCopenXML export (Q11, Q12).
@@ -515,6 +523,7 @@ PLCopen XML (CODESYS 3.5):
 - AOI definitions from a separate note or vault file, so AOI boxes get labels without pasting the definition into every block
 - Click a tag to search the vault; cross-reference every rung in the vault that touches a tag
 - Scale-to-fit option for wide rungs
+- Wrap inside branch legs, for rungs that are one wide branch (M4 wraps only between top-level elements)
 - Position-based drawing for non-series-parallel PLCopen networks from tools that write real `<position>`s (dropped from M3, see 3.5)
 
 ---

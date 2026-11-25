@@ -12,6 +12,7 @@ export interface BlockHeader {
 	start?: number;
 	numbers?: boolean;
 	align?: Align;
+	wrap?: boolean;
 }
 
 export interface BlockMessage {
@@ -93,10 +94,11 @@ export function splitHeader(source: string): SplitResult {
 				else errors.push({ line: lineNo, message: "start must be a whole number." });
 				break;
 			}
-			case "numbers": {
-				if (BOOL_TRUE.includes(value)) header.numbers = true;
-				else if (BOOL_FALSE.includes(value)) header.numbers = false;
-				else errors.push({ line: lineNo, message: "numbers must be on or off." });
+			case "numbers":
+			case "wrap": {
+				if (BOOL_TRUE.includes(value)) header[key] = true;
+				else if (BOOL_FALSE.includes(value)) header[key] = false;
+				else errors.push({ line: lineNo, message: `${key} must be on or off.` });
 				break;
 			}
 			default:

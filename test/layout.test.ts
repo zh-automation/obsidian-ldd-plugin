@@ -234,6 +234,53 @@ describe("layout: IEC function blocks", () => {
 	});
 });
 
+describe("layout: rung wrapping", () => {
+	const marks = (g: Geometry) => texts(g, "wrap");
+	const railR = (g: Geometry) => rails(g)[1]!.x1;
+	const railL = (g: Geometry) => rails(g)[0]!.x1;
+
+	it("does not wrap without a wrap width, or when the rung fits", () => {
+		expect(marks(lay(NEUTRAL.N11_long))).toEqual([]);
+		expect(marks(lay(NEUTRAL.N02_seal_in, { wrapWidth: 700 }))).toEqual([]);
+	});
+
+	it("wraps a long rung into rows no wider than the wrap width", () => {
+		const g = lay(NEUTRAL.N11_long, { wrapWidth: 700 });
+		expect(g.width).toBeLessThanOrEqual(700);
+		const rows = marks(g).length / 2 + 1;
+		expect(rows).toBeGreaterThan(5);
+		expect(marks(g).every((m) => m === ">>")).toBe(true);
+		// All 41 elements are still drawn, one rung number, one connection to each rail.
+		expect(syms(g)).toHaveLength(41);
+		expect(texts(g, "num")).toEqual(["0"]);
+		expect(lines(g).filter((l) => l.cls === "wire" && l.x1 === railL(g))).toHaveLength(1);
+		expect(lines(g).filter((l) => l.cls === "wire" && l.x2 === railR(g))).toHaveLength(1);
+		// Every symbol stays inside the rails.
+		for (const sym of syms(g)) expect(sym.x + sym.w).toBeLessThan(railR(g));
+	});
+
+	it("keeps rows in order and the coil on the last row", () => {
+		const g = lay(NEUTRAL.N11_long, { wrapWidth: 700 });
+		const ys = [...new Set(syms(g).map((s) => s.y))];
+		expect(ys).toEqual([...ys].sort((a, b) => a - b));
+		const coil = syms(g).find((s) => s.t === "coil")!;
+		expect(coil.y).toBe(Math.max(...ys));
+	});
+
+	it("right-aligns outputs on the last row with align: right", () => {
+		const g = lay(NEUTRAL.N11_long, { wrapWidth: 700, align: "right" });
+		const coil = syms(g).find((s) => s.t === "coil")!;
+		expect(cellRight(coil)).toBeCloseTo(railR(g) - S.rungPadX, 5);
+	});
+
+	it("never splits a branch, widening the diagram when one branch is wider than the space", () => {
+		const wide = `[${NEUTRAL.N11_long.replace(/OTE\(.*\);$/, "")},XIC(Bypass)]OTE(Out);`;
+		const g = lay(wide, { wrapWidth: 500 });
+		expect(g.width).toBeGreaterThan(2000);
+		expect(verticalWires(g).length).toBeGreaterThanOrEqual(2);
+	});
+});
+
 describe("layout: options and text", () => {
 	it("marks non-N rung types in the left margin, left of the rung number", () => {
 		const rungs: Rung[] = parseNeutralText("XIC(A)OTE(B);\nXIC(C)OTE(D);").rungs.map((r, i) => ({ ...r, number: i }));

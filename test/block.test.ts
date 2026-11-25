@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 import { caretSnippet, renderBlock } from "../src/render/block";
+import { pngRatio, standaloneSvg } from "../src/render/export";
+import { DEFAULT_SETTINGS } from "../src/settings";
 import { NEUTRAL } from "./fixtures/neutral";
 import { PLCOPEN } from "./fixtures/plcopen";
 import { L5K, L5X } from "./fixtures/rockwell";
@@ -121,11 +123,72 @@ describe("renderBlock", () => {
 		expect(el.querySelector("text.ldd-comment")?.textContent).toContain("<img");
 	});
 
+	it("wraps to the given width and lays out again on relayout without re-parsing", () => {
+		const el = document.createElement("div");
+		const block = renderBlock(NEUTRAL.N11_long, el, { width: 640 });
+		const svg1 = el.querySelector("svg")!;
+		expect(Number(svg1.getAttribute("width"))).toBeLessThanOrEqual(640);
+		expect(el.querySelectorAll("text.ldd-wrap").length).toBeGreaterThan(0);
+
+		// The 41-element rung is about 5,000 px wide unwrapped.
+		block.relayout(8000);
+		const svg2 = el.querySelector("svg")!;
+		expect(svg2).not.toBe(svg1);
+		expect(el.querySelectorAll("text.ldd-wrap")).toHaveLength(0);
+		expect(Number(svg2.getAttribute("height"))).toBeLessThan(Number(svg1.getAttribute("height")));
+
+		// A width change below the step is ignored.
+		block.relayout(8004);
+		expect(el.querySelector("svg")).toBe(svg2);
+	});
+
+	it("applies settings: scale, symbols, and no wrapping", () => {
+		const el = document.createElement("div");
+		renderBlock(NEUTRAL.N11_long, el, { width: 640, settings: { ...DEFAULT_SETTINGS, wrap: false, scale: 50, style: "iec" } });
+		expect(el.querySelectorAll("text.ldd-wrap")).toHaveLength(0);
+		expect((el.querySelector(".ldd-block") as HTMLElement).dataset.style).toBe("iec");
+		const svg = el.querySelector("svg")!;
+		const viewW = Number(svg.getAttribute("viewBox")!.split(" ")[2]);
+		expect(Number(svg.getAttribute("width"))).toBe(Math.ceil(viewW / 2));
+	});
+
+	it("numbers cached rungs afresh for each header start", () => {
+		const body = "XIC(A)OTE(B);\nXIC(C)OTE(D);";
+		const nums = (src: string) => [...render(src).querySelectorAll("text.ldd-num")].map((t) => t.textContent);
+		expect(nums(`---\nstart: 5\n---\n${body}`)).toEqual(["5", "6"]);
+		expect(nums(body)).toEqual(["0", "1"]);
+	});
+
 	it("replaces previous content when re-rendered into the same element", () => {
 		const el = document.createElement("div");
 		renderBlock("XIC(A)OTE(B);", el);
 		renderBlock("XIC(A)OTE(B);", el);
 		expect(el.querySelectorAll(".ldd-block")).toHaveLength(1);
+	});
+});
+
+describe("export", () => {
+	it("makes standalone SVG: xmlns, inlined theme styles, background, text intact", () => {
+		const style = document.createElement("style");
+		style.textContent = ".ldd-wire { stroke: #123456; stroke-width: 1.5px; }";
+		document.head.appendChild(style);
+		const el = render("XIC(Start_PB)OTE(Run);");
+		document.body.appendChild(el);
+		const text = standaloneSvg(el.querySelector("svg")!, "#fafafa");
+		style.remove();
+		el.remove();
+
+		expect(text).toContain('xmlns="http://www.w3.org/2000/svg"');
+		expect(text).toMatch(/<rect width="100%" height="100%" fill="#fafafa"/);
+		expect(text).toMatch(/class="ldd-wire"[^>]*style="[^"]*stroke:\s*(#123456|rgb\(18, 52, 86\))/);
+		expect(text).toContain(">Start_PB<");
+		expect(text).toContain("<title>XIC(Start_PB)</title>");
+	});
+
+	it("lowers the PNG pixel ratio for very large diagrams", () => {
+		expect(pngRatio(800, 600)).toBe(2);
+		expect(pngRatio(1000, 32000)).toBe(0.5);
+		expect(pngRatio(1000, 1e9)).toBe(0.25);
 	});
 });
 

@@ -17,11 +17,11 @@ export function svgEl<K extends keyof SVGElementTagNameMap>(
 
 const r = (n: number) => Math.round(n * 10) / 10;
 
-export function renderGeometry(doc: Document, g: Geometry, ariaLabel: string): SVGSVGElement {
+export function renderGeometry(doc: Document, g: Geometry, ariaLabel: string, scale = 1): SVGSVGElement {
 	const root = svgEl(doc, "svg", {
 		class: "ldd-svg",
-		width: g.width,
-		height: g.height,
+		width: Math.ceil(g.width * scale),
+		height: Math.ceil(g.height * scale),
 		viewBox: `0 0 ${g.width} ${g.height}`,
 		role: "img",
 		"aria-label": ariaLabel,

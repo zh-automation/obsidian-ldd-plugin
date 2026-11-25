@@ -43,10 +43,10 @@ describe("splitHeader", () => {
 	});
 
 	it("parses every supported key", () => {
-		const r = splitHeader("---\nformat: L5K\nstyle: iec\nstart: 12\nnumbers: off\nalign: right\n---\nN: XIC(A)OTE(B);");
-		expect(r.header).toEqual({ format: "l5k", style: "iec", start: 12, numbers: false, align: "right" });
+		const r = splitHeader("---\nformat: L5K\nstyle: iec\nstart: 12\nnumbers: off\nalign: right\nwrap: on\n---\nN: XIC(A)OTE(B);");
+		expect(r.header).toEqual({ format: "l5k", style: "iec", start: 12, numbers: false, align: "right", wrap: true });
 		expect(r.body).toBe("N: XIC(A)OTE(B);");
-		expect(r.bodyLineOffset).toBe(7);
+		expect(r.bodyLineOffset).toBe(8);
 		expect(r.errors).toEqual([]);
 	});
 

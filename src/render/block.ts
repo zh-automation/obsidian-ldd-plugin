@@ -1,14 +1,18 @@
 /**
  * Code block entry point: header, format detection, parse, layout, render.
  * Plain DOM APIs only, so this runs under a test DOM as well as inside Obsidian.
+ *
+ * Parsing happens once per source text (and is cached across re-renders); laying out again for a
+ * new width or new settings reuses the parsed rungs.
  */
-import { detectFormat, splitHeader, type BlockHeader, type Format } from "../detect";
-import { layoutRungs, type LayoutStyle } from "../layout/layout";
+import { detectFormat, splitHeader, type Format } from "../detect";
+import { layoutRungs } from "../layout/layout";
 import type { FrontEndResult, Section } from "../parsers/common";
 import { parseL5K } from "../parsers/l5k";
 import { parseL5X } from "../parsers/l5x";
 import { parseNeutralText } from "../parsers/neutralText";
 import { parsePLCopen } from "../parsers/plcopen";
+import { DEFAULT_SETTINGS, resolveStyle, type LadderSettings, type ResolvedStyle } from "../settings";
 import { renderGeometry } from "./svg";
 
 export interface BlockError {
@@ -34,8 +38,41 @@ function parseBody(format: Format, body: string): FrontEndResult {
 	}
 }
 
-export function renderBlock(source: string, el: HTMLElement): void {
+/** Parsed results keyed by format and body, so re-renders (Live Preview, resize) skip parsing. */
+const PARSE_CACHE_SIZE = 16;
+const parseCache = new Map<string, FrontEndResult>();
+
+function parseCached(format: Format, body: string): FrontEndResult {
+	const key = `${format}\u0000${body}`;
+	const hit = parseCache.get(key);
+	if (hit) {
+		parseCache.delete(key);
+		parseCache.set(key, hit);
+		return hit;
+	}
+	const parsed = parseBody(format, body);
+	parseCache.set(key, parsed);
+	if (parseCache.size > PARSE_CACHE_SIZE) parseCache.delete(parseCache.keys().next().value ?? "");
+	return parsed;
+}
+
+export interface BlockOptions {
+	settings?: LadderSettings;
+	/** Width available on screen in CSS pixels; 0 or absent turns wrapping off. */
+	width?: number;
+}
+
+export interface RenderedBlock {
+	/** Lay the diagrams out again for a new width (cheap: no parsing). */
+	relayout(width: number): void;
+}
+
+/** Widths closer than this are treated as unchanged, so small jitters do not redraw. */
+const WIDTH_STEP = 8;
+
+export function renderBlock(source: string, el: HTMLElement, options: BlockOptions = {}): RenderedBlock {
 	const doc = el.ownerDocument;
+	const settings = options.settings ?? DEFAULT_SETTINGS;
 	el.replaceChildren();
 
 	const root = doc.createElement("div");
@@ -48,7 +85,7 @@ export function renderBlock(source: string, el: HTMLElement): void {
 	root.dataset.format = format;
 	const errors: BlockError[] = [...split.errors];
 
-	const parsed = parseBody(format, body);
+	const parsed = parseCached(format, body);
 	for (const e of parsed.errors) errors.push({ line: e.line + bodyLineOffset, col: e.col, message: e.message });
 
 	if (errors.length > 0) root.appendChild(renderErrors(doc, errors, source));
@@ -56,17 +93,32 @@ export function renderBlock(source: string, el: HTMLElement): void {
 
 	if (parsed.sections.length === 0) {
 		if (errors.length === 0 && parsed.notices.length === 0) root.appendChild(note(doc, "No rungs found."));
-		return;
+		return { relayout: () => undefined };
 	}
 
-	const style = styleFor(header, format);
-	root.dataset.style = style.symbols;
-	// CODESYS numbers networks from 1; Logix numbers rungs from 0.
-	const start = header.start ?? (format === "plcopen" ? 1 : 0);
-	for (const section of parsed.sections) renderSection(doc, root, section, start, style);
+	const diagrams = doc.createElement("div");
+	diagrams.className = "ldd-diagrams";
+	root.appendChild(diagrams);
+
+	let drawnWidth = -1;
+	const draw = (width: number) => {
+		drawnWidth = width;
+		const style = resolveStyle(header, settings, format, width);
+		root.dataset.style = style.layout.symbols;
+		diagrams.replaceChildren();
+		for (const section of parsed.sections) renderSection(doc, diagrams, section, style);
+	};
+	draw(options.width ?? 0);
+
+	return {
+		relayout(width: number) {
+			if (Math.abs(width - drawnWidth) < WIDTH_STEP) return;
+			draw(width);
+		},
+	};
 }
 
-function renderSection(doc: Document, root: HTMLElement, section: Section, start: number, style: Partial<LayoutStyle>): void {
+function renderSection(doc: Document, root: HTMLElement, section: Section, style: ResolvedStyle): void {
 	if (section.title) {
 		const h = doc.createElement("div");
 		h.className = "ldd-section-title";
@@ -78,28 +130,12 @@ function renderSection(doc: Document, root: HTMLElement, section: Section, start
 		root.appendChild(note(doc, "No rungs."));
 		return;
 	}
-	rungs.forEach((r, i) => {
-		if (r.number === undefined) r.number = start + i;
-	});
-	const geometry = layoutRungs(rungs, style);
+	// Parsed rungs are shared through the cache: number copies, never the originals.
+	const numbered = rungs.map((r, i) => (r.number === undefined ? { ...r, number: style.start + i } : r));
+	const geometry = layoutRungs(numbered, style.layout);
 	const where = section.title ? `, ${section.title}` : "";
 	const label = `Ladder diagram${where}, ${rungs.length} rung${rungs.length === 1 ? "" : "s"}`;
-	root.appendChild(renderGeometry(doc, geometry, label));
-}
-
-/**
- * Drawing style: IEC symbols for PLCopen and Rockwell symbols for the Logix formats (D2), unless
- * the header says otherwise. Outputs follow the last input in Rockwell style (Studio 5000, Q14)
- * and sit against the right rail in IEC style (CODESYS).
- */
-function styleFor(header: BlockHeader, format: Format): Partial<LayoutStyle> & Pick<LayoutStyle, "symbols"> {
-	const symbols = header.style ?? (format === "plcopen" ? "iec" : "rockwell");
-	const style: Partial<LayoutStyle> & Pick<LayoutStyle, "symbols"> = {
-		symbols,
-		align: header.align ?? (symbols === "iec" ? "right" : "inline"),
-	};
-	if (header.numbers !== undefined) style.numbers = header.numbers;
-	return style;
+	root.appendChild(renderGeometry(doc, geometry, label, style.scale));
 }
 
 function note(doc: Document, text: string): HTMLElement {

@@ -19,9 +19,9 @@ const withSamples = process.argv.includes("--samples");
 const window = new Window();
 const document = window.document as unknown as Document;
 
-function block(title: string, source: string, showSource = true): string {
+function block(title: string, source: string, showSource = true, width = 0): string {
 	const el = document.createElement("div");
-	renderBlock(source, el as HTMLElement);
+	renderBlock(source, el as HTMLElement, { width });
 	const src = showSource ? `<pre class="src">${escapeHtml(source)}</pre>` : "";
 	return `<section><h3>${escapeHtml(title)}</h3>${src}${el.innerHTML}</section>`;
 }
@@ -47,6 +47,8 @@ sections.push(
 		].join("\n"),
 	),
 );
+sections.push(block("N11_long wrapped to 700 px", NEUTRAL.N11_long, false, 700));
+sections.push(block("N03 + N11 wrapped to 700 px, outputs right", `---\nalign: right\n---\n${NEUTRAL.N03_nested}\n${NEUTRAL.N11_long}`, false, 700));
 for (const [name, src] of Object.entries(L5X)) sections.push(block(name, src));
 for (const [name, src] of Object.entries(L5K)) sections.push(block(name, src));
 for (const [name, src] of Object.entries(PLCOPEN)) sections.push(block(name, src, false));
@@ -82,6 +84,7 @@ if (withSamples) {
 			const picked = [...rungs].sort((a, b) => score(b) - score(a)).slice(0, 4);
 			picked.push(...rungs.filter((r) => r.length < 120).slice(0, 2));
 			sections.push(block(`${path.basename(file)} (most complex + short)`, picked.join("\n"), false));
+			sections.push(block(`${path.basename(file)} (most complex, wrapped to 900 px)`, picked.slice(0, 2).join("\n"), false, 900));
 		}
 		// PLCopen exports are small enough to render whole.
 		for (const file of walk(dir).filter((f) => /\.xml$/i.test(f))) {

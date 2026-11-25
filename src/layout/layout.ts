@@ -31,6 +31,11 @@ export interface LayoutStyle {
 	align: Align;
 	/** Contact symbol style: Rockwell "] [" or IEC "| |". */
 	symbols: Symbols;
+	/**
+	 * Total drawing width to wrap rungs into (layout units); 0 never wraps. Wide rungs break at
+	 * top-level element boundaries and continue on the next row, marked ">>" at both ends.
+	 */
+	wrapWidth: number;
 }
 
 export type Symbols = "rockwell" | "iec";
@@ -53,6 +58,7 @@ export const DEFAULT_STYLE: LayoutStyle = {
 	numbers: true,
 	align: "inline",
 	symbols: "rockwell",
+	wrapWidth: 0,
 };
 
 export type TextClass =
@@ -66,6 +72,7 @@ export type TextClass =
 	| "box-text"
 	| "pin"
 	| "instance"
+	| "wrap"
 	| "err-text";
 export type LineClass = "wire" | "rail" | "err-wire";
 
@@ -485,6 +492,33 @@ function isOutput(m: Measured): boolean {
 	}
 }
 
+/** Marker drawn where a wrapped rung leaves one row and picks up on the next. */
+export const WRAP_MARK = ">>";
+const ROW_GAP = 10;
+const RIGHT_MARGIN = 6;
+const MIN_WRAPPED_INNER = 200;
+
+/**
+ * Split a rung's top-level elements into rows no wider than `limit`, greedily, never splitting an
+ * element (a branch moves as a whole). An element wider than the limit gets a row to itself.
+ */
+function packRows(kids: Measured[], limit: number): Measured[][] {
+	const rows: Measured[][] = [];
+	let cur: Measured[] = [];
+	let w = 0;
+	for (const k of kids) {
+		if (cur.length > 0 && w + k.w > limit) {
+			rows.push(cur);
+			cur = [];
+			w = 0;
+		}
+		cur.push(k);
+		w += k.w;
+	}
+	if (cur.length > 0) rows.push(cur);
+	return rows;
+}
+
 /** Index where the trailing run of output elements starts (kids.length when there is none). */
 function outputStart(kids: Measured[]): number {
 	let i = kids.length;
@@ -511,7 +545,20 @@ export function layoutRungs(rungs: Rung[], style: Partial<LayoutStyle> = {}): Ge
 	const badgeChars = Math.max(0, ...rungs.map((r) => r.type?.length ?? 0));
 	const badgeW = badgeChars > 0 ? badgeChars * s.charW + 8 : 0;
 	const railL = numW + badgeW;
-	const innerW = Math.max(s.minInnerW, ...measured.map((m) => m.w + 2 * s.rungPadX));
+
+	// Width between the rails. Without wrapping it fits the widest rung. With wrapping it is capped
+	// at the available width, but never narrower than the widest single element (which can't split).
+	const markW = WRAP_MARK.length * s.charW + 8;
+	const natural = Math.max(s.minInnerW, ...measured.map((m) => m.w + 2 * s.rungPadX));
+	let innerW = natural;
+	if (s.wrapWidth > 0) {
+		const avail = s.wrapWidth - railL - RIGHT_MARGIN;
+		if (natural > avail) {
+			const tooWide = measured.filter((m) => m.w + 2 * s.rungPadX > avail);
+			const widestPiece = Math.max(0, ...tooWide.flatMap((m) => m.kids.map((k) => k.w)));
+			innerW = Math.max(avail, widestPiece + 2 * s.rungPadX + 2 * markW, MIN_WRAPPED_INNER);
+		}
+	}
 	const railR = railL + innerW;
 	const commentChars = Math.max(10, Math.floor((innerW - 2 * s.rungPadX) / s.charW));
 
@@ -529,12 +576,11 @@ export function layoutRungs(rungs: Rung[], style: Partial<LayoutStyle> = {}): Ge
 			y += 2;
 		}
 
-		const errLines = rung.error ? wrapText(`Parse error: ${rung.error}`, commentChars) : [];
-		const a = rung.error ? Math.max(minA, errLines.length * s.lineH + 6) : Math.max(m.a, minA);
-		const h = rung.error ? Math.max(minH, a + 8) : Math.max(m.h + (a - m.a), minH);
-		const wireY = y + a;
-
+		let firstWireY: number;
 		if (rung.error) {
+			const errLines = wrapText(`Parse error: ${rung.error}`, commentChars);
+			const a = Math.max(minA, errLines.length * s.lineH + 6);
+			const wireY = y + a;
 			const textTop = wireY - 6 - errLines.length * s.lineH;
 			errLines.forEach((line, li) => {
 				out.push({
@@ -547,31 +593,57 @@ export function layoutRungs(rungs: Rung[], style: Partial<LayoutStyle> = {}): Ge
 				});
 			});
 			out.push({ t: "line", cls: "err-wire", x1: railL, y1: wireY, x2: railR, y2: wireY });
+			firstWireY = wireY;
+			y += Math.max(minH, a + 8);
 		} else {
-			const split = s.align === "right" ? outputStart(m.kids) : m.kids.length;
-			let cx = railL + s.rungPadX;
-			wire(out, railL, cx, wireY);
-			m.kids.forEach((k, idx) => {
-				if (idx === split) {
-					const outW = m.kids.slice(split).reduce((sum, kk) => sum + kk.w, 0);
-					const outX = railR - s.rungPadX - outW;
-					wire(out, cx, outX, wireY);
-					cx = Math.max(cx, outX);
+			const rows = m.w + 2 * s.rungPadX > innerW ? packRows(m.kids, innerW - 2 * s.rungPadX - 2 * markW) : [m.kids];
+			firstWireY = y;
+			rows.forEach((row, r) => {
+				const first = r === 0;
+				const last = r === rows.length - 1;
+				const a = Math.max(minA, ...row.map((k) => k.a));
+				const h = Math.max(minH, ...row.map((k) => a - k.a + k.h));
+				const wireY = y + a;
+				if (first) firstWireY = wireY;
+
+				let cx = railL + s.rungPadX;
+				if (first) {
+					wire(out, railL, cx, wireY);
+				} else {
+					// Continued from the row above.
+					out.push({ t: "text", cls: "wrap", x: cx, y: wireY + 4, text: WRAP_MARK, anchor: "start" });
+					cx += markW;
 				}
-				place(k, cx, wireY - k.a, k.w, s, out);
-				cx += k.w;
+				const split = last && s.align === "right" ? outputStart(row) : row.length;
+				const endX = last ? railR - s.rungPadX : railR - s.rungPadX - markW;
+				row.forEach((k, idx) => {
+					if (idx === split) {
+						const outW = row.slice(split).reduce((sum, kk) => sum + kk.w, 0);
+						const outX = endX - outW;
+						wire(out, cx, outX, wireY);
+						cx = Math.max(cx, outX);
+					}
+					place(k, cx, wireY - k.a, k.w, s, out);
+					cx += k.w;
+				});
+				if (last) {
+					wire(out, cx, railR, wireY);
+				} else {
+					wire(out, cx, endX + 2, wireY);
+					out.push({ t: "text", cls: "wrap", x: endX + 4, y: wireY + 4, text: WRAP_MARK, anchor: "start" });
+				}
+				y += h + (last ? 0 : ROW_GAP);
 			});
-			wire(out, cx, railR, wireY);
 		}
 
 		if (s.numbers && rung.number !== undefined) {
-			out.push({ t: "text", cls: "num", x: railL - 6, y: wireY + 4, text: String(rung.number), anchor: "end" });
+			out.push({ t: "text", cls: "num", x: railL - 6, y: firstWireY + 4, text: String(rung.number), anchor: "end" });
 		}
 		if (rung.type) {
-			out.push({ t: "text", cls: "badge", x: 4, y: wireY + 4, text: rung.type, anchor: "start" });
+			out.push({ t: "text", cls: "badge", x: 4, y: firstWireY + 4, text: rung.type, anchor: "start" });
 		}
 
-		y += h + s.rungGap;
+		y += s.rungGap;
 	});
 
 	const bottom = Math.max(y - s.rungGap + 4, top0 + minH);
