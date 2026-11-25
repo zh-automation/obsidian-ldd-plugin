@@ -1,6 +1,6 @@
 {
   "name": "ladder-logic-diagrams",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Obsidian plugin: render ladder logic rungs from Studio 5000 neutral text, L5X, L5K, and PLCopen XML.",
   "private": true,
   "type": "module",
